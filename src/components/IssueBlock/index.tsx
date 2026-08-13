@@ -1,6 +1,8 @@
+import Badge from '@app/components/Common/Badge';
 import Button from '@app/components/Common/Button';
 import { issueOptions } from '@app/components/IssueModal/constants';
 import { useUser } from '@app/hooks/useUser';
+import defineMessages from '@app/utils/defineMessages';
 import {
   CalendarIcon,
   ExclamationTriangleIcon,
@@ -10,6 +12,10 @@ import {
 import type Issue from '@server/entity/Issue';
 import Link from 'next/link';
 import { useIntl } from 'react-intl';
+
+const messages = defineMessages('components.IssueBlock', {
+  deletionrequested: 'Deletion Requested',
+});
 
 interface IssueBlockProps {
   issue: Issue;
@@ -35,6 +41,13 @@ const IssueBlock = ({ issue }: IssueBlockProps) => {
             <span className="w-40 truncate md:w-auto">
               {intl.formatMessage(issueOption.name)}
             </span>
+            {issue.deletionRequested && (
+              <span className="ml-2">
+                <Badge badgeType="danger">
+                  {intl.formatMessage(messages.deletionrequested)}
+                </Badge>
+              </span>
+            )}
           </div>
           <div className="white mb-1 flex flex-nowrap">
             <UserIcon className="mr-1.5 h-5 w-5 min-w-0 flex-shrink-0" />

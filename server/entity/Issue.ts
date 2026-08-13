@@ -33,6 +33,9 @@ class Issue {
   @Column({ type: 'int', default: 0 })
   public problemEpisode: number;
 
+  @Column({ default: false })
+  public deletionRequested: boolean;
+
   @ManyToOne(() => Media, (media) => media.issues, {
     eager: true,
     onDelete: 'CASCADE',
