@@ -37,6 +37,11 @@ const messages = defineMessages('components.IssueModal.CreateIssueModal', {
   toastviewissue: 'View Issue',
   reportissue: 'Report an Issue',
   submitissue: 'Submit Issue',
+  requestdeletion: 'Request deletion of this {mediaType}',
+  requestdeletiontip:
+    'Ask an administrator to remove this item instead of fixing it.',
+  movie: 'movie',
+  series: 'series',
 });
 
 const isMovie = (movie: MovieDetails | TvDetails): movie is MovieDetails => {
@@ -97,6 +102,7 @@ const CreateIssueModal = ({
         message: '',
         problemSeason: availableSeasons.length === 1 ? availableSeasons[0] : 0,
         problemEpisode: 0,
+        deletionRequested: false,
       }}
       validationSchema={CreateIssueModalSchema}
       onSubmit={async (values) => {
@@ -108,6 +114,7 @@ const CreateIssueModal = ({
             problemSeason: values.problemSeason,
             problemEpisode:
               values.problemSeason > 0 ? values.problemEpisode : 0,
+            deletionRequested: values.deletionRequested,
           });
 
           if (data) {
@@ -309,6 +316,27 @@ const CreateIssueModal = ({
                 typeof errors.message === 'string' && (
                   <div className="error">{errors.message}</div>
                 )}
+            </div>
+            <div className="mt-4 flex items-start rounded-md border border-gray-500 bg-gray-800/30 p-4">
+              <Field
+                type="checkbox"
+                id="deletionRequested"
+                name="deletionRequested"
+                className="mt-0.5 flex-shrink-0"
+              />
+              <label
+                htmlFor="deletionRequested"
+                className="mb-0 ml-3 cursor-pointer"
+              >
+                {intl.formatMessage(messages.requestdeletion, {
+                  mediaType: intl.formatMessage(
+                    mediaType === 'movie' ? messages.movie : messages.series
+                  ),
+                })}
+                <span className="label-tip">
+                  {intl.formatMessage(messages.requestdeletiontip)}
+                </span>
+              </label>
             </div>
           </Modal>
         );

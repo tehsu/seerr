@@ -1,9 +1,13 @@
 import { IssueStatus, IssueType } from '@server/constants/issue';
+import { MediaStatus } from '@server/constants/media';
 import { getRepository } from '@server/datasource';
 import Issue from '@server/entity/Issue';
 import IssueComment from '@server/entity/IssueComment';
 import Media from '@server/entity/Media';
 import type { IssueResultsResponse } from '@server/interfaces/api/issueInterfaces';
+import deleteMediaFile, {
+  MediaServiceNotConfiguredError,
+} from '@server/lib/mediaDeletion';
 import { Permission } from '@server/lib/permissions';
 import logger from '@server/logger';
 import { isAuthenticated } from '@server/middleware/auth';
@@ -104,6 +108,7 @@ issueRoutes.post<
     issueType: number;
     problemSeason: number;
     problemEpisode: number;
+    deletionRequested?: boolean;
   }
 >(
   '/',
@@ -132,6 +137,7 @@ issueRoutes.post<
       issueType: req.body.issueType,
       problemSeason: req.body.problemSeason,
       problemEpisode: req.body.problemEpisode,
+      deletionRequested: !!req.body.deletionRequested,
       media,
       comments: [
         new IssueComment({
@@ -364,6 +370,80 @@ issueRoutes.post<{ issueId: string; status: string }, Issue>(
       });
       next({ status: 500, message: 'Issue not found.' });
     }
+  }
+);
+
+issueRoutes.delete<{ issueId: string }>(
+  '/:issueId/media',
+  isAuthenticated([Permission.MANAGE_ISSUES, Permission.MANAGE_REQUESTS], {
+    type: 'and',
+  }),
+  async (req, res, next) => {
+    const issueRepository = getRepository(Issue);
+    const mediaRepository = getRepository(Media);
+
+    let media: Media;
+
+    try {
+      const issue = await issueRepository.findOneOrFail({
+        where: { id: Number(req.params.issueId) },
+        relations: { media: true },
+      });
+
+      media = await mediaRepository.findOneOrFail({
+        where: { id: issue.media.id },
+      });
+    } catch (e) {
+      logger.debug('Failed to retrieve issue media for deletion.', {
+        label: 'API',
+        errorMessage: e.message,
+      });
+      return next({ status: 404, message: 'Issue not found.' });
+    }
+
+    // Only attempt to remove the versions that are actually managed by a
+    // Radarr/Sonarr server. Anything else (e.g. media only ever scanned in from
+    // the media server) is simply cleared from Seerr below.
+    const versions: boolean[] = [];
+
+    if (media.serviceId != null && media.serviceId >= 0) {
+      versions.push(false);
+    }
+
+    if (media.serviceId4k != null && media.serviceId4k >= 0) {
+      versions.push(true);
+    }
+
+    try {
+      for (const is4k of versions) {
+        await deleteMediaFile(media, is4k);
+      }
+    } catch (e) {
+      logger.error('Something went wrong deleting media files for an issue.', {
+        label: 'Issue',
+        errorMessage: e.message,
+        issueId: Number(req.params.issueId),
+        mediaId: media.id,
+      });
+
+      return next({
+        status: e instanceof MediaServiceNotConfiguredError ? 400 : 500,
+        message:
+          e instanceof MediaServiceNotConfiguredError
+            ? e.message
+            : 'Something went wrong deleting the media files.',
+      });
+    }
+
+    // Removing the media also removes any issues attached to it
+    if (media.status === MediaStatus.BLOCKLISTED) {
+      media.resetServiceData();
+      await mediaRepository.save(media);
+    } else {
+      await mediaRepository.remove(media);
+    }
+
+    return res.status(204).send();
   }
 );
 

@@ -28,6 +28,7 @@ const messages = defineMessages('components.IssueList.IssueItem', {
   viewissue: 'View Issue',
   unknownissuetype: 'Unknown',
   descriptionpreview: 'Issue Description',
+  deletionrequested: 'Deletion Requested',
 });
 
 const isMovie = (movie: MovieDetails | TvDetails): movie is MovieDetails => {
@@ -229,6 +230,13 @@ const IssueItem = ({ issue }: IssueItemProps) => {
               <Badge badgeType="success" href={`/issues/${issue.id}`}>
                 {intl.formatMessage(globalMessages.resolved)}
               </Badge>
+            )}
+            {issue.deletionRequested && (
+              <span className="ml-2">
+                <Badge badgeType="danger" href={`/issues/${issue.id}`}>
+                  {intl.formatMessage(messages.deletionrequested)}
+                </Badge>
+              </span>
             )}
           </div>
           <div className="card-field">

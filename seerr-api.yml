@@ -2036,6 +2036,9 @@ components:
         issueType:
           type: number
           example: 1
+        deletionRequested:
+          type: boolean
+          example: false
         media:
           $ref: '#/components/schemas/MediaInfo'
         createdBy:
@@ -7567,6 +7570,13 @@ paths:
                   type: string
                 mediaId:
                   type: number
+                problemSeason:
+                  type: number
+                problemEpisode:
+                  type: number
+                deletionRequested:
+                  type: boolean
+                  default: false
       responses:
         '201':
           description: Succesfully created the issue
@@ -7641,6 +7651,30 @@ paths:
       responses:
         '204':
           description: Succesfully removed issue
+  /issue/{issueId}/media:
+    delete:
+      summary: Delete the media an issue was reported against
+      description: |
+        Removes the media item an issue was reported against from its Radarr/Sonarr server (including any files), then deletes the media from Seerr. Deleting the media also deletes any issues reported against it.
+
+        Requires the `MANAGE_ISSUES` and `MANAGE_REQUESTS` permissions, or `ADMIN`.
+      tags:
+        - issue
+      parameters:
+        - in: path
+          name: issueId
+          description: Issue ID
+          required: true
+          example: '1'
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Succesfully removed media
+        '400':
+          description: No Radarr/Sonarr server is configured for the media
+        '404':
+          description: Issue not found
   /issue/{issueId}/comment:
     post:
       summary: Create a comment

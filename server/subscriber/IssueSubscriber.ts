@@ -44,6 +44,13 @@ export class IssueSubscriber implements EntitySubscriberInterface<Issue> {
       const [firstComment] = sortBy(entity.comments, 'id');
       const extra: { name: string; value: string }[] = [];
 
+      if (entity.deletionRequested) {
+        extra.push({
+          name: 'Deletion Requested',
+          value: 'Yes',
+        });
+      }
+
       if (entity.media.mediaType === MediaType.TV && entity.problemSeason > 0) {
         extra.push({
           name: 'Affected Season',

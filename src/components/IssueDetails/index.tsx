@@ -1,6 +1,7 @@
 import Badge from '@app/components/Common/Badge';
 import Button from '@app/components/Common/Button';
 import CachedImage from '@app/components/Common/CachedImage';
+import ConfirmButton from '@app/components/Common/ConfirmButton';
 import LoadingSpinner from '@app/components/Common/LoadingSpinner';
 import Modal from '@app/components/Common/Modal';
 import PageTitle from '@app/components/Common/PageTitle';
@@ -20,7 +21,7 @@ import {
   PlayIcon,
   ServerIcon,
 } from '@heroicons/react/24/outline';
-import { ArrowPathIcon } from '@heroicons/react/24/solid';
+import { ArrowPathIcon, TrashIcon } from '@heroicons/react/24/solid';
 import { IssueStatus } from '@server/constants/issue';
 import { MediaType } from '@server/constants/media';
 import { MediaServerType } from '@server/constants/server';
@@ -71,6 +72,14 @@ const messages = defineMessages('components.IssueDetails', {
   nocomments: 'No comments.',
   unknownissuetype: 'Unknown',
   commentplaceholder: 'Add a comment…',
+  deletionrequested: 'Deletion Requested',
+  deletemedia: 'Delete Media',
+  deletemediatip:
+    'Removes the {mediaType} and its files from {arr}, then clears it from Seerr along with this issue.',
+  toastmediadeleted: 'Media deleted successfully!',
+  toastmediadeletefailed: 'Something went wrong while deleting the media.',
+  movie: 'movie',
+  series: 'series',
 });
 
 const isMovie = (movie: MovieDetails | TvDetails): movie is MovieDetails => {
@@ -175,8 +184,57 @@ const IssueDetails = () => {
     }
   };
 
+  const deleteMedia = async () => {
+    try {
+      await axios.delete(`/api/v1/issue/${issueData.id}/media`);
+      mutate('/api/v1/issue/count');
+
+      addToast(intl.formatMessage(messages.toastmediadeleted), {
+        appearance: 'success',
+        autoDismiss: true,
+      });
+      router.push('/issues');
+    } catch (e) {
+      addToast(
+        e.response?.data?.message ??
+          intl.formatMessage(messages.toastmediadeletefailed),
+        {
+          appearance: 'error',
+          autoDismiss: true,
+        }
+      );
+    }
+  };
+
   const title = isMovie(data) ? data.title : data.name;
   const releaseYear = isMovie(data) ? data.releaseDate : data.firstAirDate;
+
+  const deleteMediaButton = hasPermission(
+    [Permission.MANAGE_ISSUES, Permission.MANAGE_REQUESTS],
+    { type: 'and' }
+  ) ? (
+    <div>
+      <ConfirmButton
+        onClick={() => deleteMedia()}
+        confirmText={intl.formatMessage(globalMessages.areyousure)}
+        className="w-full"
+      >
+        <TrashIcon />
+        <span>{intl.formatMessage(messages.deletemedia)}</span>
+      </ConfirmButton>
+      <div className="mt-1 text-xs text-gray-400">
+        {intl.formatMessage(messages.deletemediatip, {
+          mediaType: intl.formatMessage(
+            issueData.media.mediaType === MediaType.MOVIE
+              ? messages.movie
+              : messages.series
+          ),
+          arr:
+            issueData.media.mediaType === MediaType.MOVIE ? 'Radarr' : 'Sonarr',
+        })}
+      </div>
+    </div>
+  ) : null;
 
   return (
     <div
@@ -252,6 +310,11 @@ const IssueDetails = () => {
             {issueData.status === IssueStatus.RESOLVED && (
               <Badge badgeType="success">
                 {intl.formatMessage(globalMessages.resolved)}
+              </Badge>
+            )}
+            {issueData.deletionRequested && (
+              <Badge badgeType="danger" className="ml-2">
+                {intl.formatMessage(messages.deletionrequested)}
               </Badge>
             )}
           </div>
@@ -467,6 +530,7 @@ const IssueDetails = () => {
                     </span>
                   </Button>
                 )}
+              {deleteMediaButton}
             </div>
           </div>
           <div className="mt-6">
@@ -732,6 +796,7 @@ const IssueDetails = () => {
                   </span>
                 </Button>
               )}
+            {deleteMediaButton}
           </div>
         </div>
       </div>
