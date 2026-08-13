@@ -2,15 +2,17 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: Deploy to GitHub Pages
 
+# Disabled (builds-only CI): automatic triggers are commented out below.
+# Uncomment them to re-enable this workflow. Manual runs still work.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - develop
-    paths:
-      - 'docs/**'
-      - 'gen-docs/**'
-      - 'seerr-api.yml'
+  # push:
+  #   branches:
+  #     - develop
+  #   paths:
+  #     - 'docs/**'
+  #     - 'gen-docs/**'
+  #     - 'seerr-api.yml'
 
 permissions:
   contents: read

@@ -2,11 +2,14 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: 'Seerr Labeller'
 
+# Disabled (builds-only CI): automatic triggers are commented out below.
+# Uncomment them to re-enable this workflow.
 on:
-  pull_request_target:
-    types: [labeled, unlabeled, reopened]
-  issues:
-    types: [labeled, unlabeled, reopened]
+  workflow_dispatch:
+  # pull_request_target:
+  #   types: [labeled, unlabeled, reopened]
+  # issues:
+  #   types: [labeled, unlabeled, reopened]
 
 permissions: {}
 

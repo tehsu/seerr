@@ -2,13 +2,16 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: Merge Conflict Labeler
 
+# Disabled (builds-only CI): automatic triggers are commented out below.
+# Uncomment them to re-enable this workflow.
 on:
-  push:
-    branches: [develop]
+  workflow_dispatch:
+  # push:
+  #   branches: [develop]
 
-  pull_request_target:
-    branches: [develop]
-    types: [opened, synchronize, reopened]
+  # pull_request_target:
+  #   branches: [develop]
+  #   types: [opened, synchronize, reopened]
 
 permissions:
   contents: read

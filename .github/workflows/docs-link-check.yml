@@ -2,23 +2,25 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: Check Docs Links
 
+# Disabled (builds-only CI): automatic triggers are commented out below.
+# Uncomment them to re-enable this workflow. Manual runs still work.
 on:
-  pull_request:
-    branches:
-      - '*'
-    paths:
-      - 'docs/**'
-      - 'gen-docs/**'
-      - '.github/workflows/docs-link-check.yml'
-  push:
-    branches:
-      - develop
-    paths:
-      - 'docs/**'
-      - 'gen-docs/**'
-      - '.github/workflows/docs-link-check.yml'
-  schedule:
-    - cron: '50 7 * * 5'
+  # pull_request:
+  #   branches:
+  #     - '*'
+  #   paths:
+  #     - 'docs/**'
+  #     - 'gen-docs/**'
+  #     - '.github/workflows/docs-link-check.yml'
+  # push:
+  #   branches:
+  #     - develop
+  #   paths:
+  #     - 'docs/**'
+  #     - 'gen-docs/**'
+  #     - '.github/workflows/docs-link-check.yml'
+  # schedule:
+  #   - cron: '50 7 * * 5'
   workflow_dispatch:
 
 permissions:

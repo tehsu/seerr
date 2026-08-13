@@ -2,19 +2,22 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: 'CodeQL'
 
+# Disabled (builds-only CI): automatic triggers are commented out below.
+# Uncomment them to re-enable this workflow.
 on:
-  push:
-    branches: ['develop']
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-  pull_request:
-    branches: ['develop']
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-  schedule:
-    - cron: '50 7 * * 5'
+  workflow_dispatch:
+  # push:
+  #   branches: ['develop']
+  #   paths-ignore:
+  #     - '**/*.md'
+  #     - 'docs/**'
+  # pull_request:
+  #   branches: ['develop']
+  #   paths-ignore:
+  #     - '**/*.md'
+  #     - 'docs/**'
+  # schedule:
+  #   - cron: '50 7 * * 5'
 
 permissions:
   contents: read

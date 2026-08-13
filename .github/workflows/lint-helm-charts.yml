@@ -2,17 +2,20 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: Lint and Test Charts
 
+# Disabled (builds-only CI): automatic triggers are commented out below.
+# Uncomment them to re-enable this workflow.
 on:
-  pull_request:
-    branches:
-      - develop
-    paths:
-      - '.github/workflows/lint-helm-charts.yml'
-      - 'charts/**'
-  push:
-    branches: [develop]
-    paths:
-      - 'charts/**'
+  workflow_dispatch:
+  # pull_request:
+  #   branches:
+  #     - develop
+  #   paths:
+  #     - '.github/workflows/lint-helm-charts.yml'
+  #     - 'charts/**'
+  # push:
+  #   branches: [develop]
+  #   paths:
+  #     - 'charts/**'
 
 permissions:
   contents: read
