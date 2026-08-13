@@ -11,6 +11,7 @@ import Table from '@app/components/Common/Table';
 import BulkEditModal from '@app/components/UserList/BulkEditModal';
 import PlexImportModal from '@app/components/UserList/PlexImportModal';
 import useSettings from '@app/hooks/useSettings';
+import useToasts from '@app/hooks/useToasts';
 import { useUpdateQueryParams } from '@app/hooks/useUpdateQueryParams';
 import type { User } from '@app/hooks/useUser';
 import { Permission, UserType, useUser } from '@app/hooks/useUser';
@@ -37,7 +38,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
-import { useToasts } from 'react-toast-notifications';
 import useSWR from 'swr';
 import validator from 'validator';
 import * as Yup from 'yup';
@@ -750,12 +750,12 @@ const UserList = () => {
             >
               {intl.formatMessage(messages.created)}
             </SortableColumnHeader>
-            <Table.TH className="w-1/12 whitespace-nowrap text-right">
+            <Table.TH className="w-1/12 min-w-[12rem] whitespace-nowrap text-right">
               {(data.results ?? []).length > 1 && (
                 <div className="flex justify-end">
                   <Button
                     buttonType="warning"
-                    className="w-full sm:min-w-[12rem]"
+                    className="w-full"
                     onClick={() => setShowBulkEditModal(true)}
                     disabled={selectedUsers.length === 0}
                   >
@@ -874,33 +874,32 @@ const UserList = () => {
                   day: 'numeric',
                 })}
               </Table.TD>
-              <Table.TD
-                alignText="right"
-                className="grid grid-cols-1 gap-1 sm:grid-cols-2 sm:gap-2"
-              >
-                <Button
-                  buttonType="warning"
-                  disabled={user.id === 1 && currentUser?.id !== 1}
-                  onClick={() =>
-                    router.push(
-                      '/users/[userId]/settings',
-                      `/users/${user.id}/settings`
-                    )
-                  }
-                >
-                  {intl.formatMessage(globalMessages.edit)}
-                </Button>
-                <Button
-                  buttonType="danger"
-                  disabled={
-                    user.id === 1 ||
-                    (currentUser?.id !== 1 &&
-                      hasPermission(Permission.ADMIN, user.permissions))
-                  }
-                  onClick={() => setDeleteModal({ isOpen: true, user })}
-                >
-                  {intl.formatMessage(globalMessages.delete)}
-                </Button>
+              <Table.TD alignText="right">
+                <div className="grid grid-cols-1 gap-1 sm:grid-cols-2 sm:gap-2">
+                  <Button
+                    buttonType="warning"
+                    disabled={user.id === 1 && currentUser?.id !== 1}
+                    onClick={() =>
+                      router.push(
+                        '/users/[userId]/settings',
+                        `/users/${user.id}/settings`
+                      )
+                    }
+                  >
+                    {intl.formatMessage(globalMessages.edit)}
+                  </Button>
+                  <Button
+                    buttonType="danger"
+                    disabled={
+                      user.id === 1 ||
+                      (currentUser?.id !== 1 &&
+                        hasPermission(Permission.ADMIN, user.permissions))
+                    }
+                    onClick={() => setDeleteModal({ isOpen: true, user })}
+                  >
+                    {intl.formatMessage(globalMessages.delete)}
+                  </Button>
+                </div>
               </Table.TD>
             </tr>
           ))}

@@ -17,7 +17,7 @@ import logger from '@server/logger';
 import { isAuthenticated } from '@server/middleware/auth';
 import { Router } from 'express';
 import type { FindOneOptions } from 'typeorm';
-import { In, IsNull, Not } from 'typeorm';
+import { EntityNotFoundError, In, IsNull, Not } from 'typeorm';
 
 const mediaRoutes = Router();
 
@@ -187,11 +187,15 @@ mediaRoutes.delete(
 
       return res.status(204).send();
     } catch (e) {
-      logger.error('Something went wrong fetching media in delete request', {
+      if (e instanceof EntityNotFoundError) {
+        return res.status(204).send();
+      }
+      logger.error('Something went wrong deleting media', {
         label: 'Media',
+        mediaId: req.params.id,
         message: e.message,
       });
-      next({ status: 404, message: 'Media not found' });
+      next({ status: 500, message: 'Failed to delete media' });
     }
   }
 );
@@ -212,23 +216,40 @@ mediaRoutes.delete(
         await deleteMediaFile(media, is4k);
       } catch (e) {
         if (e instanceof MediaServiceNotConfiguredError) {
-          logger.warn(e.message, {
-            label: 'Media',
-            mediaId: media.id,
-          });
-          return next({ status: 400, message: e.message });
+          logger.info(
+            `There is no default ${e.arrName} server configured. Did you set any of your ${e.arrName} servers as default?`,
+            {
+              label: 'Media Request',
+              mediaId: media.id,
+            }
+          );
+          return next({ status: 409, message: e.message });
         }
 
         throw e;
       }
 
+      if (media.mediaType === MediaType.TV) {
+        for (const season of media.seasons) {
+          season[is4k ? 'status4k' : 'status'] = MediaStatus.DELETED;
+        }
+      }
+
+      media[is4k ? 'status4k' : 'status'] = MediaStatus.DELETED;
+      media.resetServiceData(is4k);
+      await mediaRepository.save(media);
+
       return res.status(204).send();
     } catch (e) {
-      logger.error('Something went wrong fetching media in delete request', {
+      if (e instanceof EntityNotFoundError) {
+        return next({ status: 404, message: 'Media not found' });
+      }
+      logger.error('Something went wrong deleting media file', {
         label: 'Media',
+        mediaId: req.params.id,
         message: e.message,
       });
-      next({ status: 404, message: 'Media not found' });
+      next({ status: 500, message: 'Failed to delete media file' });
     }
   }
 );
