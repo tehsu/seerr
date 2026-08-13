@@ -6,6 +6,7 @@ import ConfirmButton from '@app/components/Common/ConfirmButton';
 import RequestModal from '@app/components/RequestModal';
 import StatusBadge from '@app/components/StatusBadge';
 import useDeepLinks from '@app/hooks/useDeepLinks';
+import useToasts from '@app/hooks/useToasts';
 import { Permission, useUser } from '@app/hooks/useUser';
 import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
@@ -28,7 +29,6 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { FormattedRelativeTime, useIntl } from 'react-intl';
-import { useToasts } from 'react-toast-notifications';
 import useSWR, { mutate } from 'swr';
 
 const messages = defineMessages('components.RequestList.RequestItem', {
@@ -47,6 +47,7 @@ const messages = defineMessages('components.RequestList.RequestItem', {
   tvdbid: 'TheTVDB ID',
   unknowntitle: 'Unknown Title',
   removearr: 'Remove from {arr}',
+  removemediaerror: 'Something went wrong while removing the media.',
   profileName: 'Profile',
 });
 
@@ -333,6 +334,7 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
     try {
       await axios.post(`/api/v1/request/${request.id}/${type}`);
       revalidate();
+      revalidateList();
       mutate('/api/v1/request/count');
     } catch {
       addToast(intl.formatMessage(messages.failedmodify), {
@@ -353,10 +355,20 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
 
   const deleteMediaFile = async () => {
     if (request.media) {
-      await axios.delete(
-        `/api/v1/media/${request.media.id}/file?is4k=${request.is4k}`
-      );
-      await axios.delete(`/api/v1/media/${request.media.id}`);
+      try {
+        await axios.delete(
+          `/api/v1/media/${request.media.id}/file?is4k=${request.is4k}`
+        );
+      } catch (e) {
+        if (!axios.isAxiosError(e) || e.response?.status !== 404) {
+          addToast(intl.formatMessage(messages.removemediaerror), {
+            autoDismiss: true,
+            appearance: 'error',
+          });
+          revalidateList();
+          return;
+        }
+      }
       revalidateList();
     }
   };

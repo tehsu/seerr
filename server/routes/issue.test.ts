@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { before, describe, it, mock } from 'node:test';
+import { before, beforeEach, describe, it, mock } from 'node:test';
 
 import { IssueType } from '@server/constants/issue';
 import { MediaStatus, MediaType } from '@server/constants/media';
@@ -19,9 +19,13 @@ import request from 'supertest';
 import authRoutes from './auth';
 import issueRoutes from './issue';
 
-// Creating an issue notifies admins, which means fetching metadata from TMDB.
-// That is not what these tests are exercising.
-mock.method(IssueSubscriber.prototype, 'afterInsert', () => undefined);
+const sendIssueNotificationMock = mock.method(
+  IssueSubscriber.prototype as unknown as {
+    sendIssueNotification: (...args: unknown[]) => Promise<void>;
+  },
+  'sendIssueNotification',
+  async () => undefined
+).mock;
 
 let app: Express;
 
@@ -58,6 +62,10 @@ before(async () => {
   app = createApp();
 });
 
+beforeEach(() => {
+  sendIssueNotificationMock.resetCalls();
+});
+
 setupTestDb();
 
 async function loginAs(email: string, password: string) {
@@ -75,13 +83,6 @@ async function loginAs(email: string, password: string) {
   }
 }
 
-async function grantPermissions(email: string, permissions: number) {
-  const userRepository = getRepository(User);
-  const user = await userRepository.findOneOrFail({ where: { email } });
-  user.permissions = permissions;
-  await userRepository.save(user);
-}
-
 async function seedMedia(fields: Partial<Media> = {}) {
   return getRepository(Media).save(
     new Media({
@@ -95,68 +96,189 @@ async function seedMedia(fields: Partial<Media> = {}) {
 }
 
 async function seedIssue(media: Media) {
-  const issueRepository = getRepository(Issue);
-  const user = await getRepository(User).findOneOrFail({
+  const createdBy = await getRepository(User).findOneOrFail({
     where: { email: 'friend@seerr.dev' },
   });
 
-  return issueRepository.save(
+  return getRepository(Issue).save(
     new Issue({
       issueType: IssueType.VIDEO,
       media,
-      createdBy: user,
+      createdBy,
       deletionRequested: true,
     })
   );
 }
 
 describe('POST /issue', () => {
-  it('stores a requested deletion', async () => {
+  it('creates an issue on behalf of the supplied userId', async () => {
+    const issueRepo = getRepository(Issue);
+    const userRepo = getRepository(User);
     const media = await seedMedia();
-    await grantPermissions('friend@seerr.dev', Permission.CREATE_ISSUES);
+    const friend = await userRepo.findOneOrFail({
+      where: { email: 'friend@seerr.dev' },
+    });
+
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
+    const res = await agent.post('/issue').send({
+      issueType: IssueType.VIDEO,
+      message: 'Playback stutters near the end.',
+      mediaId: media.id,
+      problemSeason: 0,
+      problemEpisode: 0,
+      userId: friend.id,
+    });
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.createdBy.email, 'friend@seerr.dev');
+    assert.strictEqual(res.body.comments[0].user.email, 'friend@seerr.dev');
+
+    const persisted = await issueRepo.findOneOrFail({
+      where: { id: res.body.id },
+    });
+
+    assert.strictEqual(persisted.createdBy.id, friend.id);
+    assert.strictEqual(persisted.comments[0].user.id, friend.id);
+  });
+
+  it('defaults to the authenticated user when userId is omitted', async () => {
+    const media = await seedMedia();
+
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
+    const res = await agent.post('/issue').send({
+      issueType: IssueType.AUDIO,
+      message: 'Audio is out of sync.',
+      mediaId: media.id,
+    });
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.createdBy.email, 'admin@seerr.dev');
+    assert.strictEqual(res.body.comments[0].user.email, 'admin@seerr.dev');
+  });
+
+  it('allows creators to supply their own userId', async () => {
+    const userRepo = getRepository(User);
+    const media = await seedMedia();
+    const friend = await userRepo.findOneOrFail({
+      where: { email: 'friend@seerr.dev' },
+    });
+
+    friend.permissions = Permission.CREATE_ISSUES;
+    await userRepo.save(friend);
+
+    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const res = await agent.post('/issue').send({
+      issueType: IssueType.SUBTITLES,
+      message: 'Subtitles are missing.',
+      mediaId: media.id,
+      userId: friend.id,
+    });
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.createdBy.email, 'friend@seerr.dev');
+    assert.strictEqual(res.body.comments[0].user.email, 'friend@seerr.dev');
+  });
+
+  it('prevents non-managers from supplying another userId', async () => {
+    const userRepo = getRepository(User);
+    const media = await seedMedia();
+    const friend = await userRepo.findOneOrFail({
+      where: { email: 'friend@seerr.dev' },
+    });
+    const admin = await userRepo.findOneOrFail({
+      where: { email: 'admin@seerr.dev' },
+    });
+
+    friend.permissions = Permission.CREATE_ISSUES;
+    await userRepo.save(friend);
+
+    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const res = await agent.post('/issue').send({
+      issueType: IssueType.OTHER,
+      message: 'Something else is wrong.',
+      mediaId: media.id,
+      userId: admin.id,
+    });
+
+    assert.strictEqual(res.status, 403);
+    assert.strictEqual(
+      res.body.message,
+      'You do not have permission to create an issue on behalf of another user.'
+    );
+  });
+
+  it('returns 404 when the supplied userId does not exist', async () => {
+    const media = await seedMedia();
+
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
+    const res = await agent.post('/issue').send({
+      issueType: IssueType.OTHER,
+      message: 'Something else is wrong.',
+      mediaId: media.id,
+      userId: 999999,
+    });
+
+    assert.strictEqual(res.status, 404);
+    assert.strictEqual(res.body.message, 'Issue user not found');
+  });
+
+  it('stores a requested deletion', async () => {
+    const userRepo = getRepository(User);
+    const media = await seedMedia();
+    const friend = await userRepo.findOneOrFail({
+      where: { email: 'friend@seerr.dev' },
+    });
+
+    friend.permissions = Permission.CREATE_ISSUES;
+    await userRepo.save(friend);
 
     const agent = await loginAs('friend@seerr.dev', 'test1234');
     const res = await agent.post('/issue').send({
       issueType: IssueType.VIDEO,
-      message: 'Wrong movie entirely, please remove it',
+      message: 'Wrong movie entirely, please remove it.',
       mediaId: media.id,
       deletionRequested: true,
     });
 
-    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.status, 201);
     assert.strictEqual(res.body.deletionRequested, true);
 
-    const issue = await getRepository(Issue).findOneOrFail({
+    const persisted = await getRepository(Issue).findOneOrFail({
       where: { id: res.body.id },
     });
-    assert.strictEqual(issue.deletionRequested, true);
+    assert.strictEqual(persisted.deletionRequested, true);
   });
 
   it('does not request deletion by default', async () => {
     const media = await seedMedia();
-    await grantPermissions('friend@seerr.dev', Permission.CREATE_ISSUES);
 
-    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
     const res = await agent.post('/issue').send({
       issueType: IssueType.VIDEO,
-      message: 'Audio is out of sync',
+      message: 'Audio is out of sync.',
       mediaId: media.id,
     });
 
-    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.status, 201);
 
-    const issue = await getRepository(Issue).findOneOrFail({
+    const persisted = await getRepository(Issue).findOneOrFail({
       where: { id: res.body.id },
     });
-    assert.strictEqual(issue.deletionRequested, false);
+    assert.strictEqual(persisted.deletionRequested, false);
   });
 });
 
 describe('DELETE /issue/:issueId/media', () => {
   it('prevents users without the required permissions from deleting media', async () => {
+    const userRepo = getRepository(User);
     const media = await seedMedia();
     const issue = await seedIssue(media);
-    await grantPermissions('friend@seerr.dev', Permission.CREATE_ISSUES);
+    const friend = await userRepo.findOneOrFail({
+      where: { email: 'friend@seerr.dev' },
+    });
+
+    friend.permissions = Permission.CREATE_ISSUES;
+    await userRepo.save(friend);
 
     const agent = await loginAs('friend@seerr.dev', 'test1234');
     const res = await agent.delete(`/issue/${issue.id}/media`);
@@ -193,7 +315,7 @@ describe('DELETE /issue/:issueId/media', () => {
     const agent = await loginAs('admin@seerr.dev', 'test1234');
     const res = await agent.delete(`/issue/${issue.id}/media`);
 
-    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.status, 409);
     assert.notStrictEqual(
       await getRepository(Media).findOne({ where: { id: media.id } }),
       null
