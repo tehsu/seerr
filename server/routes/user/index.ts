@@ -324,8 +324,8 @@ router.post<
   }
 });
 
-router.get<{ userId: string }>(
-  '/:userId/pushSubscriptions',
+router.get<{ id: string }>(
+  '/:id/pushSubscriptions',
   isOwnProfileOrAdmin(),
   async (req, res, next) => {
     try {
@@ -333,7 +333,7 @@ router.get<{ userId: string }>(
 
       const userPushSubs = await userPushSubRepository.find({
         relations: { user: true },
-        where: { user: { id: Number(req.params.userId) } },
+        where: { user: { id: Number(req.params.id) } },
       });
 
       return res.status(200).json(userPushSubs);
@@ -343,8 +343,8 @@ router.get<{ userId: string }>(
   }
 );
 
-router.get<{ userId: string; endpoint: string }>(
-  '/:userId/pushSubscription/:endpoint',
+router.get<{ id: string; endpoint: string }>(
+  '/:id/pushSubscription/:endpoint',
   isOwnProfileOrAdmin(),
   async (req, res, next) => {
     try {
@@ -355,7 +355,7 @@ router.get<{ userId: string; endpoint: string }>(
           user: true,
         },
         where: {
-          user: { id: Number(req.params.userId) },
+          user: { id: Number(req.params.id) },
           endpoint: req.params.endpoint,
         },
       });
@@ -367,8 +367,8 @@ router.get<{ userId: string; endpoint: string }>(
   }
 );
 
-router.delete<{ userId: string; endpoint: string }>(
-  '/:userId/pushSubscription/:endpoint',
+router.delete<{ id: string; endpoint: string }>(
+  '/:id/pushSubscription/:endpoint',
   isOwnProfileOrAdmin(),
   async (req, res, next) => {
     try {
@@ -377,7 +377,7 @@ router.delete<{ userId: string; endpoint: string }>(
       const userPushSub = await userPushSubRepository.findOne({
         relations: { user: true },
         where: {
-          user: { id: Number(req.params.userId) },
+          user: { id: Number(req.params.id) },
           endpoint: req.params.endpoint,
         },
       });
@@ -419,6 +419,30 @@ router.get<{ id: string }>('/:id', async (req, res, next) => {
     next({ status: 404, message: 'User not found.' });
   }
 });
+
+router.get<{ jellyfinUserId: string }>(
+  '/jellyfin/:jellyfinUserId',
+  async (req, res, next) => {
+    try {
+      const userRepository = getRepository(User);
+
+      const jellyfinUserId = normalizeJellyfinGuid(req.params.jellyfinUserId);
+      if (!jellyfinUserId) {
+        return next({ status: 400, message: 'Invalid Jellyfin User ID.' });
+      }
+
+      const user = await userRepository.findOneOrFail({
+        where: { jellyfinUserId },
+      });
+
+      return res
+        .status(200)
+        .json(user.filter(req.user?.hasPermission(Permission.MANAGE_USERS)));
+    } catch {
+      next({ status: 404, message: 'User not found.' });
+    }
+  }
+);
 
 router.use('/:id/settings', userSettingsRoutes);
 
@@ -648,6 +672,7 @@ router.post(
 
       const plexUsersResponse = await mainPlexTv.getUsers();
       const createdUsers: User[] = [];
+      let refreshedUsers = 0;
       for (const rawUser of plexUsersResponse.MediaContainer.User) {
         const account = rawUser.$;
 
@@ -672,6 +697,7 @@ router.post(
               user.plexId = parseInt(account.id);
             }
             await userRepository.save(user);
+            refreshedUsers += 1;
           } else if (!body || body.plexIds.includes(account.id)) {
             if (await mainPlexTv.checkUserAccess(parseInt(account.id))) {
               const newUser = new User({
@@ -690,7 +716,10 @@ router.post(
         }
       }
 
-      return res.status(201).json(User.filterMany(createdUsers));
+      return res.status(201).json({
+        createdUsers: User.filterMany(createdUsers),
+        refreshedUsers,
+      });
     } catch (e) {
       next({ status: 500, message: e.message });
     }

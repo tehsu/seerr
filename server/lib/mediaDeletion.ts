@@ -6,9 +6,12 @@ import type Media from '@server/entity/Media';
 import { getSettings } from '@server/lib/settings';
 
 export class MediaServiceNotConfiguredError extends Error {
-  constructor(message: string) {
-    super(message);
+  public readonly arrName: string;
+
+  constructor(arrName: string) {
+    super(`No ${arrName} server configured to delete media files`);
     this.name = 'MediaServiceNotConfiguredError';
+    this.arrName = arrName;
   }
 }
 
@@ -38,13 +41,7 @@ const deleteMediaFile = async (media: Media, is4k = false): Promise<void> => {
     }
 
     if (!serviceSettings) {
-      throw new MediaServiceNotConfiguredError(
-        `There is no ${
-          is4k ? '4K ' : ''
-        }Radarr server configured for this item. Did you set any of your ${
-          is4k ? '4K ' : ''
-        }Radarr servers as default?`
-      );
+      throw new MediaServiceNotConfiguredError(`${is4k ? '4K ' : ''}Radarr`);
     }
 
     const radarr = new RadarrAPI({
@@ -67,13 +64,7 @@ const deleteMediaFile = async (media: Media, is4k = false): Promise<void> => {
   }
 
   if (!serviceSettings) {
-    throw new MediaServiceNotConfiguredError(
-      `There is no ${
-        is4k ? '4K ' : ''
-      }Sonarr server configured for this item. Did you set any of your ${
-        is4k ? '4K ' : ''
-      }Sonarr servers as default?`
-    );
+    throw new MediaServiceNotConfiguredError(`${is4k ? '4K ' : ''}Sonarr`);
   }
 
   const sonarr = new SonarrAPI({

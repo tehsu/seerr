@@ -9,6 +9,7 @@ import CopyButton from '@app/components/Settings/CopyButton';
 import SettingsBadge from '@app/components/Settings/SettingsBadge';
 import { availableLanguages } from '@app/context/LanguageContext';
 import useLocale from '@app/hooks/useLocale';
+import useToasts from '@app/hooks/useToasts';
 import { Permission, useUser } from '@app/hooks/useUser';
 import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
@@ -21,7 +22,6 @@ import type { AvailableLocale } from '@server/types/languages';
 import axios from 'axios';
 import { Field, Form, Formik } from 'formik';
 import { useIntl } from 'react-intl';
-import { useToasts } from 'react-toast-notifications';
 import useSWR, { mutate } from 'swr';
 import * as Yup from 'yup';
 
@@ -74,6 +74,8 @@ const messages = defineMessages('components.Settings.SettingsMain', {
   youtubeUrl: 'YouTube URL',
   youtubeUrlTip:
     'Base URL for YouTube videos if a self-hosted YouTube instance is used.',
+  versionCheck: 'Version Check',
+  versionCheckTip: 'Automatically check for new versions on GitHub.',
   validationUrl: 'You must provide a valid URL',
   validationUrlTrailingSlash: 'URL must not end in a trailing slash',
 });
@@ -183,6 +185,7 @@ const SettingsMain = () => {
             enableSpecialEpisodes: data?.enableSpecialEpisodes,
             cacheImages: data?.cacheImages,
             youtubeUrl: data?.youtubeUrl,
+            versionCheck: data?.versionCheck,
           }}
           enableReinitialize
           validationSchema={MainSettingsSchema}
@@ -205,6 +208,7 @@ const SettingsMain = () => {
                 enableSpecialEpisodes: values.enableSpecialEpisodes,
                 cacheImages: values.cacheImages,
                 youtubeUrl: values.youtubeUrl,
+                versionCheck: values?.versionCheck,
               });
               mutate('/api/v1/settings/public');
               mutate('/api/v1/status');
@@ -605,6 +609,24 @@ const SettingsMain = () => {
                       typeof errors.youtubeUrl === 'string' && (
                         <div className="error">{errors.youtubeUrl}</div>
                       )}
+                  </div>
+                </div>
+                <div className="form-row">
+                  <label htmlFor="versionCheck" className="text-label">
+                    {intl.formatMessage(messages.versionCheck)}
+                    <span className="label-tip">
+                      {intl.formatMessage(messages.versionCheckTip)}
+                    </span>
+                  </label>
+                  <div className="form-input-area">
+                    <Field
+                      type="checkbox"
+                      id="versionCheck"
+                      name="versionCheck"
+                      onChange={() => {
+                        setFieldValue('versionCheck', !values.versionCheck);
+                      }}
+                    />
                   </div>
                 </div>
                 <div className="actions">
