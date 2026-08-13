@@ -2,14 +2,16 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: Trivy Container Vulnerability Scan
 
+# Disabled (builds-only CI): automatic triggers are commented out below.
+# Uncomment them to re-enable this workflow. Manual runs still work.
 on:
-  workflow_run:
-    workflows:
-      - Seerr Release
-    types:
-      - completed
-  schedule:
-    - cron: '50 7 * * 5'
+  # workflow_run:
+  #   workflows:
+  #     - Seerr Release
+  #   types:
+  #     - completed
+  # schedule:
+  #   - cron: '50 7 * * 5'
   workflow_dispatch:
 
 permissions:

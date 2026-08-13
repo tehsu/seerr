@@ -2,10 +2,12 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: Seerr CI
 
+# Builds-only CI: the pull_request trigger is disabled so only the Docker image
+# build/publish jobs run (on pushes to develop). Uncomment below to re-enable PR checks.
 on:
-  pull_request:
-    branches:
-      - '*'
+  # pull_request:
+  #   branches:
+  #     - '*'
   push:
     branches:
       - develop

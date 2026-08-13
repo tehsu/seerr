@@ -2,13 +2,16 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: Release Charts
 
+# Disabled (builds-only CI): automatic triggers are commented out below.
+# Uncomment them to re-enable this workflow.
 on:
-  push:
-    branches:
-      - develop
-    paths:
-      - 'charts/**'
-      - '.github/workflows/release-charts.yml'
+  workflow_dispatch:
+  # push:
+  #   branches:
+  #     - develop
+  #   paths:
+  #     - 'charts/**'
+  #     - '.github/workflows/release-charts.yml'
 
 permissions:
   contents: read
