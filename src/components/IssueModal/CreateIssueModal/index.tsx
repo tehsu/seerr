@@ -112,17 +112,15 @@ const CreateIssueModal = ({
   const title = data ? (isMovie(data) ? data.title : data.name) : '';
   const arr = mediaType === 'movie' ? 'Radarr' : 'Sonarr';
 
-  // Only a Radarr/Sonarr server can go looking for another release, and
-  // blocklisted media is meant to stay gone.
+  // Everyone who can get this far is allowed to search for a release against
+  // the issue they just raised, so all that is left to check is whether there
+  // is anything to search: only a Radarr/Sonarr server can go looking for
+  // another release, and blocklisted media is meant to stay gone.
   const isManagedByArr =
     (data?.mediaInfo?.serviceId != null && data.mediaInfo.serviceId >= 0) ||
     (data?.mediaInfo?.serviceId4k != null && data.mediaInfo.serviceId4k >= 0);
   const canFindNewRelease =
-    isManagedByArr &&
-    data?.mediaInfo?.status !== MediaStatus.BLOCKLISTED &&
-    hasPermission([Permission.MANAGE_ISSUES, Permission.MANAGE_REQUESTS], {
-      type: 'and',
-    });
+    isManagedByArr && data?.mediaInfo?.status !== MediaStatus.BLOCKLISTED;
 
   const findNewRelease = async () => {
     setIsSearching(true);

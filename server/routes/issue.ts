@@ -395,12 +395,16 @@ issueRoutes.post<{ issueId: string; status: string }, Issue>(
 
 issueRoutes.post<{ issueId: string }>(
   '/:issueId/media/search',
-  isAuthenticated([Permission.MANAGE_ISSUES, Permission.MANAGE_REQUESTS], {
-    type: 'and',
+  isAuthenticated([Permission.MANAGE_ISSUES, Permission.CREATE_ISSUES], {
+    type: 'or',
   }),
   async (req, res, next) => {
     const issueRepository = getRepository(Issue);
     const mediaRepository = getRepository(Media);
+    // Satisfy typescript here. User is set, we assure you!
+    if (!req.user) {
+      return next({ status: 500, message: 'User missing from request.' });
+    }
 
     let issue: Issue;
     let media: Media;
@@ -408,7 +412,7 @@ issueRoutes.post<{ issueId: string }>(
     try {
       issue = await issueRepository.findOneOrFail({
         where: { id: Number(req.params.issueId) },
-        relations: { media: true },
+        relations: { media: true, createdBy: true },
       });
 
       media = await mediaRepository.findOneOrFail({
@@ -420,6 +424,19 @@ issueRoutes.post<{ issueId: string }>(
         errorMessage: e.message,
       });
       return next({ status: 404, message: 'Issue not found.' });
+    }
+
+    // Reporting a problem is what earns you a replacement, so anyone can search
+    // for one against an issue they raised. Acting on someone else's report is
+    // still a manager's call.
+    if (
+      issue.createdBy.id !== req.user.id &&
+      !req.user.hasPermission(Permission.MANAGE_ISSUES)
+    ) {
+      return next({
+        status: 403,
+        message: 'You do not have permission to search for this media.',
+      });
     }
 
     if (media.status === MediaStatus.BLOCKLISTED) {
