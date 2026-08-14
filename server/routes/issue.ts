@@ -12,6 +12,9 @@ import type {
 import deleteMediaFile, {
   MediaServiceNotConfiguredError,
 } from '@server/lib/mediaDeletion';
+import searchMediaRelease, {
+  MediaNotInServiceError,
+} from '@server/lib/mediaReleaseSearch';
 import restartMediaSearch from '@server/lib/mediaSearchRestart';
 import { Permission } from '@server/lib/permissions';
 import logger from '@server/logger';
@@ -387,6 +390,93 @@ issueRoutes.post<{ issueId: string; status: string }, Issue>(
       });
       next({ status: 500, message: 'Issue not found.' });
     }
+  }
+);
+
+issueRoutes.post<{ issueId: string }>(
+  '/:issueId/media/search',
+  isAuthenticated([Permission.MANAGE_ISSUES, Permission.MANAGE_REQUESTS], {
+    type: 'and',
+  }),
+  async (req, res, next) => {
+    const issueRepository = getRepository(Issue);
+    const mediaRepository = getRepository(Media);
+
+    let issue: Issue;
+    let media: Media;
+
+    try {
+      issue = await issueRepository.findOneOrFail({
+        where: { id: Number(req.params.issueId) },
+        relations: { media: true },
+      });
+
+      media = await mediaRepository.findOneOrFail({
+        where: { id: issue.media.id },
+      });
+    } catch (e) {
+      logger.debug('Failed to retrieve issue media to search for a release.', {
+        label: 'API',
+        errorMessage: e.message,
+      });
+      return next({ status: 404, message: 'Issue not found.' });
+    }
+
+    if (media.status === MediaStatus.BLOCKLISTED) {
+      return next({
+        status: 409,
+        message: 'Blocklisted media is not searched for again.',
+      });
+    }
+
+    // Only the versions actually managed by a Radarr/Sonarr server can be
+    // searched for. Anything else (e.g. media only ever scanned in from the
+    // media server) has no server to ask.
+    const versions: boolean[] = [];
+
+    if (media.serviceId != null && media.serviceId >= 0) {
+      versions.push(false);
+    }
+
+    if (media.serviceId4k != null && media.serviceId4k >= 0) {
+      versions.push(true);
+    }
+
+    if (!versions.length) {
+      return next({
+        status: 409,
+        message: 'No Radarr/Sonarr server manages this media.',
+      });
+    }
+
+    try {
+      for (const is4k of versions) {
+        await searchMediaRelease(media, is4k, {
+          season: issue.problemSeason,
+          episode: issue.problemEpisode,
+        });
+      }
+    } catch (e) {
+      logger.error('Something went wrong searching for a new release.', {
+        label: 'Issue',
+        errorMessage: e.message,
+        issueId: Number(req.params.issueId),
+        mediaId: media.id,
+      });
+
+      const isServiceError =
+        e instanceof MediaServiceNotConfiguredError ||
+        e instanceof MediaNotInServiceError;
+
+      return next({
+        status: isServiceError ? 409 : 500,
+        message: isServiceError
+          ? e.message
+          : 'Something went wrong starting the search.',
+      });
+    }
+
+    return res.status(204).send();
   }
 );
 

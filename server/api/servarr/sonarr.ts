@@ -356,6 +356,36 @@ class SonarrAPI extends ServarrBase<{
     }
   }
 
+  /**
+   * Searches every episode of a series, including the ones already in the
+   * library. searchSeries only looks for missing episodes, so it is no help
+   * when the episode is there but the release it came from is bad.
+   *
+   * Sonarr keeps the files it already has unless the search turns up releases
+   * its quality profile considers an upgrade. Failures are handed to the
+   * caller.
+   */
+  public async searchSeriesReleases(seriesId: number): Promise<void> {
+    await this.runCommand('SeriesSearch', { seriesId });
+  }
+
+  /**
+   * Same as searchSeriesReleases, narrowed to a single season.
+   */
+  public async searchSeasonReleases(
+    seriesId: number,
+    seasonNumber: number
+  ): Promise<void> {
+    await this.runCommand('SeasonSearch', { seriesId, seasonNumber });
+  }
+
+  /**
+   * Same as searchSeriesReleases, narrowed to specific episodes.
+   */
+  public async searchEpisodeReleases(episodeIds: number[]): Promise<void> {
+    await this.runCommand('EpisodeSearch', { episodeIds });
+  }
+
   public async getEpisodes(seriesId: number): Promise<EpisodeResult[]> {
     try {
       const response = await this.axios.get<EpisodeResult[]>('/episode', {

@@ -7837,6 +7837,32 @@ paths:
           description: No Radarr/Sonarr server is configured for the media
         '404':
           description: Issue not found
+  /issue/{issueId}/media/search:
+    post:
+      summary: Search for a new release of the media an issue was reported against
+      description: |
+        Asks the Radarr/Sonarr server that manages the media item to search for a new release of it. Nothing is deleted: the files already in the library are only replaced if the search turns up a release the quality profile considers an upgrade.
+
+        The search is narrowed to the season or episode the issue was reported against whenever the issue says which one is affected. Blocklisted media, and media that no Radarr/Sonarr server manages, cannot be searched for.
+
+        Requires the `MANAGE_ISSUES` and `MANAGE_REQUESTS` permissions, or `ADMIN`.
+      tags:
+        - issue
+      parameters:
+        - in: path
+          name: issueId
+          description: Issue ID
+          required: true
+          example: '1'
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Successfully started the search
+        '404':
+          description: Issue not found
+        '409':
+          description: The media cannot be searched for
   /issue/{issueId}/comment:
     post:
       summary: Create a comment

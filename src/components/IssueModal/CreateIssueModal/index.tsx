@@ -15,6 +15,7 @@ import type { TvDetails } from '@server/models/Tv';
 import axios from 'axios';
 import { Field, Formik } from 'formik';
 import Link from 'next/link';
+import { useState } from 'react';
 import { useIntl } from 'react-intl';
 import useSWR, { mutate } from 'swr';
 import * as Yup from 'yup';
@@ -42,6 +43,15 @@ const messages = defineMessages('components.IssueModal.CreateIssueModal', {
     'Ask an administrator to remove this item instead of fixing it.',
   movie: 'movie',
   series: 'series',
+  findnewrelease: 'Find a new release?',
+  findnewreleasedescription:
+    'Have {arr} search for a new release of <strong>{title}</strong> now. The current files are kept unless a better release turns up.',
+  findnewreleasesearch: 'Find New Release',
+  findnewreleasesearching: 'Searching…',
+  findnewreleaseskip: 'Not Now',
+  toastSearchSuccess:
+    'Searching for a new release of <strong>{title}</strong>.',
+  toastSearchFailed: 'Something went wrong while starting the search.',
 });
 
 const isMovie = (movie: MovieDetails | TvDetails): movie is MovieDetails => {
@@ -70,6 +80,10 @@ const CreateIssueModal = ({
   const { data, error } = useSWR<MovieDetails | TvDetails>(
     tmdbId ? `/api/v1/${mediaType}/${tmdbId}` : null
   );
+  // Set once the issue has been filed and we want to offer a search for a new
+  // release of the media it was reported against.
+  const [searchIssueId, setSearchIssueId] = useState<number | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
 
   if (!tmdbId) {
     return null;
@@ -94,6 +108,75 @@ const CreateIssueModal = ({
       intl.formatMessage(messages.validationMessageRequired)
     ),
   });
+
+  const title = data ? (isMovie(data) ? data.title : data.name) : '';
+  const arr = mediaType === 'movie' ? 'Radarr' : 'Sonarr';
+
+  // Only a Radarr/Sonarr server can go looking for another release, and
+  // blocklisted media is meant to stay gone.
+  const isManagedByArr =
+    (data?.mediaInfo?.serviceId != null && data.mediaInfo.serviceId >= 0) ||
+    (data?.mediaInfo?.serviceId4k != null && data.mediaInfo.serviceId4k >= 0);
+  const canFindNewRelease =
+    isManagedByArr &&
+    data?.mediaInfo?.status !== MediaStatus.BLOCKLISTED &&
+    hasPermission([Permission.MANAGE_ISSUES, Permission.MANAGE_REQUESTS], {
+      type: 'and',
+    });
+
+  const findNewRelease = async () => {
+    setIsSearching(true);
+
+    try {
+      await axios.post(`/api/v1/issue/${searchIssueId}/media/search`);
+
+      addToast(
+        intl.formatMessage(messages.toastSearchSuccess, {
+          title,
+          strong: (msg: React.ReactNode) => <strong>{msg}</strong>,
+        }),
+        { appearance: 'success', autoDismiss: true }
+      );
+    } catch (e) {
+      addToast(
+        e.response?.data?.message ??
+          intl.formatMessage(messages.toastSearchFailed),
+        { appearance: 'error', autoDismiss: true }
+      );
+    } finally {
+      setIsSearching(false);
+
+      if (onCancel) {
+        onCancel();
+      }
+    }
+  };
+
+  if (searchIssueId != null) {
+    return (
+      <Modal
+        backgroundClickable
+        onCancel={onCancel}
+        title={intl.formatMessage(messages.findnewrelease)}
+        subTitle={title}
+        cancelText={intl.formatMessage(messages.findnewreleaseskip)}
+        onOk={() => findNewRelease()}
+        okText={intl.formatMessage(
+          isSearching
+            ? messages.findnewreleasesearching
+            : messages.findnewreleasesearch
+        )}
+        okDisabled={isSearching}
+        backdrop={`https://image.tmdb.org/t/p/w1920_and_h800_multi_faces/${data?.backdropPath}`}
+      >
+        {intl.formatMessage(messages.findnewreleasedescription, {
+          arr,
+          title,
+          strong: (msg: React.ReactNode) => <strong>{msg}</strong>,
+        })}
+      </Modal>
+    );
+  }
 
   return (
     <Formik
@@ -122,7 +205,7 @@ const CreateIssueModal = ({
               <>
                 <div>
                   {intl.formatMessage(messages.toastSuccessCreate, {
-                    title: isMovie(data) ? data.title : data.name,
+                    title,
                     strong: (msg: React.ReactNode) => <strong>{msg}</strong>,
                   })}
                 </div>
@@ -142,6 +225,13 @@ const CreateIssueModal = ({
             mutate('/api/v1/issue/count');
           }
 
+          // Asking for a replacement makes no sense alongside a request to have
+          // the item removed altogether.
+          if (canFindNewRelease && !values.deletionRequested) {
+            setSearchIssueId(newIssue.data.id);
+            return;
+          }
+
           if (onCancel) {
             onCancel();
           }
@@ -159,7 +249,7 @@ const CreateIssueModal = ({
             backgroundClickable
             onCancel={onCancel}
             title={intl.formatMessage(messages.reportissue)}
-            subTitle={data && isMovie(data) ? data?.title : data?.name}
+            subTitle={title}
             cancelText={intl.formatMessage(globalMessages.close)}
             onOk={() => handleSubmit()}
             okText={intl.formatMessage(messages.submitissue)}

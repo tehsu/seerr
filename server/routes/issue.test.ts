@@ -13,6 +13,7 @@ import Media from '@server/entity/Media';
 import { MediaRequest } from '@server/entity/MediaRequest';
 import { User } from '@server/entity/User';
 import * as mediaDeletion from '@server/lib/mediaDeletion';
+import * as mediaReleaseSearch from '@server/lib/mediaReleaseSearch';
 import { Permission } from '@server/lib/permissions';
 import { getSettings } from '@server/lib/settings';
 import { checkUser } from '@server/middleware/auth';
@@ -48,6 +49,21 @@ const deleteMediaFileMock = mock.method(
   mediaDeletion,
   'default',
   (media: Media, is4k?: boolean) => deleteMediaFileImpl(media, is4k)
+).mock;
+
+// Which Radarr/Sonarr command a search turns into is covered by the release
+// search tests, so it is stubbed out here unless a test asks for the real thing.
+const searchMediaRelease = mediaReleaseSearch.default;
+let searchMediaReleaseImpl: typeof searchMediaRelease = async () => undefined;
+
+const searchMediaReleaseMock = mock.method(
+  mediaReleaseSearch,
+  'default',
+  (
+    media: Media,
+    is4k?: boolean,
+    target?: mediaReleaseSearch.ReleaseSearchTarget
+  ) => searchMediaReleaseImpl(media, is4k, target)
 ).mock;
 
 let app: Express;
@@ -90,6 +106,8 @@ beforeEach(() => {
   sendNotificationMock.resetCalls();
   deleteMediaFileMock.resetCalls();
   deleteMediaFileImpl = async () => undefined;
+  searchMediaReleaseMock.resetCalls();
+  searchMediaReleaseImpl = async () => undefined;
 });
 
 setupTestDb();
@@ -121,7 +139,7 @@ async function seedMedia(fields: Partial<Media> = {}) {
   );
 }
 
-async function seedIssue(media: Media) {
+async function seedIssue(media: Media, fields: Partial<Issue> = {}) {
   const createdBy = await getRepository(User).findOneOrFail({
     where: { email: 'friend@seerr.dev' },
   });
@@ -132,6 +150,7 @@ async function seedIssue(media: Media) {
       media,
       createdBy,
       deletionRequested: true,
+      ...fields,
     })
   );
 }
@@ -308,6 +327,154 @@ describe('POST /issue', () => {
       where: { id: res.body.id },
     });
     assert.strictEqual(persisted.deletionRequested, false);
+  });
+});
+
+describe('POST /issue/:issueId/media/search', () => {
+  it('prevents users without the required permissions from searching', async () => {
+    const userRepo = getRepository(User);
+    const media = await seedMedia({ serviceId: 0, externalServiceId: 4 });
+    const issue = await seedIssue(media);
+    const friend = await userRepo.findOneOrFail({
+      where: { email: 'friend@seerr.dev' },
+    });
+
+    friend.permissions = Permission.CREATE_ISSUES;
+    await userRepo.save(friend);
+
+    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const res = await agent.post(`/issue/${issue.id}/media/search`);
+
+    assert.strictEqual(res.status, 403);
+    assert.strictEqual(searchMediaReleaseMock.callCount(), 0);
+  });
+
+  it('searches for a new release and leaves the issue open', async () => {
+    const media = await seedMedia({ serviceId: 0, externalServiceId: 4 });
+    const issue = await seedIssue(media);
+
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
+    const res = await agent.post(`/issue/${issue.id}/media/search`);
+
+    assert.strictEqual(res.status, 204);
+    assert.strictEqual(searchMediaReleaseMock.callCount(), 1);
+
+    const [searchedMedia, is4k] = searchMediaReleaseMock.calls[0].arguments;
+    assert.strictEqual(searchedMedia.id, media.id);
+    assert.strictEqual(is4k, false);
+
+    // Nothing was deleted, so the media is untouched and the issue stays open
+    // until someone confirms the new release actually fixed it.
+    const persistedMedia = await getRepository(Media).findOneOrFail({
+      where: { id: media.id },
+    });
+    assert.strictEqual(persistedMedia.serviceId, 0);
+    assert.strictEqual(persistedMedia.externalServiceId, 4);
+    assert.strictEqual(persistedMedia.status, MediaStatus.AVAILABLE);
+
+    const persistedIssue = await getRepository(Issue).findOneOrFail({
+      where: { id: issue.id },
+    });
+    assert.strictEqual(persistedIssue.status, IssueStatus.OPEN);
+  });
+
+  it('narrows the search to the reported season and episode', async () => {
+    const media = await seedMedia({
+      mediaType: MediaType.TV,
+      serviceId: 0,
+      externalServiceId: 4,
+    });
+    const issue = await seedIssue(media, {
+      problemSeason: 2,
+      problemEpisode: 5,
+    });
+
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
+    const res = await agent.post(`/issue/${issue.id}/media/search`);
+
+    assert.strictEqual(res.status, 204);
+    assert.deepStrictEqual(searchMediaReleaseMock.calls[0].arguments[2], {
+      season: 2,
+      episode: 5,
+    });
+  });
+
+  it('searches for both versions of the media', async () => {
+    const media = await seedMedia({
+      serviceId: 0,
+      serviceId4k: 1,
+      externalServiceId: 4,
+      externalServiceId4k: 5,
+      status4k: MediaStatus.AVAILABLE,
+    });
+    const issue = await seedIssue(media);
+
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
+    const res = await agent.post(`/issue/${issue.id}/media/search`);
+
+    assert.strictEqual(res.status, 204);
+    assert.deepStrictEqual(
+      searchMediaReleaseMock.calls.map((call) => call.arguments[1]),
+      [false, true]
+    );
+  });
+
+  it('refuses media no Radarr/Sonarr server manages', async () => {
+    const media = await seedMedia();
+    const issue = await seedIssue(media);
+
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
+    const res = await agent.post(`/issue/${issue.id}/media/search`);
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(searchMediaReleaseMock.callCount(), 0);
+  });
+
+  it('refuses blocklisted media', async () => {
+    const media = await seedMedia({
+      serviceId: 0,
+      externalServiceId: 4,
+      status: MediaStatus.BLOCKLISTED,
+    });
+    const issue = await seedIssue(media);
+
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
+    const res = await agent.post(`/issue/${issue.id}/media/search`);
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(searchMediaReleaseMock.callCount(), 0);
+  });
+
+  it('reports a Radarr/Sonarr server that is not configured', async () => {
+    searchMediaReleaseImpl = searchMediaRelease;
+    const media = await seedMedia({ serviceId: 1, externalServiceId: 4 });
+    const issue = await seedIssue(media);
+
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
+    const res = await agent.post(`/issue/${issue.id}/media/search`);
+
+    assert.strictEqual(res.status, 409);
+    assert.match(res.body.message, /Radarr/);
+  });
+
+  it('reports a failed search', async () => {
+    searchMediaReleaseImpl = async () => {
+      throw new Error('Radarr is down');
+    };
+    const media = await seedMedia({ serviceId: 0, externalServiceId: 4 });
+    const issue = await seedIssue(media);
+
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
+    const res = await agent.post(`/issue/${issue.id}/media/search`);
+
+    assert.strictEqual(res.status, 500);
+  });
+
+  it('returns 404 for a non-existent issue', async () => {
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
+    const res = await agent.post('/issue/99999999/media/search');
+
+    assert.strictEqual(res.status, 404);
   });
 });
 
