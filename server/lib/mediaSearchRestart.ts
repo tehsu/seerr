@@ -9,7 +9,7 @@ import { MediaRequest } from '@server/entity/MediaRequest';
 import SeasonRequest from '@server/entity/SeasonRequest';
 import type { User } from '@server/entity/User';
 import logger from '@server/logger';
-import { Not } from 'typeorm';
+import { In, Not } from 'typeorm';
 
 /**
  * Hands a media item that was just deleted back to Radarr/Sonarr so a fresh
@@ -57,11 +57,16 @@ const restartMediaSearch = async (
   });
   await mediaRepository.save(currentMedia);
 
+  // Requests that were never handed to Radarr/Sonarr are left alone: they did
+  // not put anything in the library, so there is nothing of theirs to replace,
+  // and a request still waiting for approval should keep waiting.
   const requests = await requestRepository.find({
     where: {
       media: { id: currentMedia.id },
       is4k,
-      status: Not(MediaRequestStatus.DECLINED),
+      status: Not(
+        In([MediaRequestStatus.PENDING, MediaRequestStatus.DECLINED])
+      ),
     },
     order: { id: 'DESC' },
     relations: { media: true, requestedBy: true, modifiedBy: true },

@@ -323,22 +323,32 @@ describe('restartMediaSearch', () => {
     assert.strictEqual(approvedSends(sonarrSends).length, 1);
   });
 
-  it('ignores declined requests', async () => {
+  it('leaves requests that never reached Radarr as they are', async () => {
     const media = await seedMovie();
     const declined = await seedRequest(media, {
       status: MediaRequestStatus.DECLINED,
+    });
+    const pending = await seedRequest(media, {
+      status: MediaRequestStatus.PENDING,
     });
     const user = await admin();
     clearSends();
 
     const restarted = await restartMediaSearch(media, false, user);
 
+    // neither of them downloaded the media, so a new request is made for it
     assert.strictEqual(restarted.length, 1);
-    assert.notStrictEqual(restarted[0].id, declined.id);
+    assert.ok(![declined.id, pending.id].includes(restarted[0].id));
 
-    const persistedDeclined = await getRepository(MediaRequest).findOneOrFail({
+    const requestRepository = getRepository(MediaRequest);
+    const persistedDeclined = await requestRepository.findOneOrFail({
       where: { id: declined.id },
     });
     assert.strictEqual(persistedDeclined.status, MediaRequestStatus.DECLINED);
+
+    const persistedPending = await requestRepository.findOneOrFail({
+      where: { id: pending.id },
+    });
+    assert.strictEqual(persistedPending.status, MediaRequestStatus.PENDING);
   });
 });
