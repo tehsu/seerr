@@ -331,7 +331,7 @@ describe('POST /issue', () => {
 });
 
 describe('POST /issue/:issueId/media/search', () => {
-  it('prevents users without the required permissions from searching', async () => {
+  it('lets the reporter search against their own issue', async () => {
     const userRepo = getRepository(User);
     const media = await seedMedia({ serviceId: 0, externalServiceId: 4 });
     const issue = await seedIssue(media);
@@ -340,6 +340,66 @@ describe('POST /issue/:issueId/media/search', () => {
     });
 
     friend.permissions = Permission.CREATE_ISSUES;
+    await userRepo.save(friend);
+
+    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const res = await agent.post(`/issue/${issue.id}/media/search`);
+
+    assert.strictEqual(res.status, 204);
+    assert.strictEqual(searchMediaReleaseMock.callCount(), 1);
+  });
+
+  it("prevents reporters from searching against someone else's issue", async () => {
+    const userRepo = getRepository(User);
+    const media = await seedMedia({ serviceId: 0, externalServiceId: 4 });
+    const admin = await userRepo.findOneOrFail({
+      where: { email: 'admin@seerr.dev' },
+    });
+    const issue = await seedIssue(media, { createdBy: admin });
+    const friend = await userRepo.findOneOrFail({
+      where: { email: 'friend@seerr.dev' },
+    });
+
+    friend.permissions = Permission.CREATE_ISSUES;
+    await userRepo.save(friend);
+
+    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const res = await agent.post(`/issue/${issue.id}/media/search`);
+
+    assert.strictEqual(res.status, 403);
+    assert.strictEqual(searchMediaReleaseMock.callCount(), 0);
+  });
+
+  it("lets a manager search against someone else's issue", async () => {
+    const userRepo = getRepository(User);
+    const media = await seedMedia({ serviceId: 0, externalServiceId: 4 });
+    const admin = await userRepo.findOneOrFail({
+      where: { email: 'admin@seerr.dev' },
+    });
+    const issue = await seedIssue(media, { createdBy: admin });
+    const friend = await userRepo.findOneOrFail({
+      where: { email: 'friend@seerr.dev' },
+    });
+
+    friend.permissions = Permission.MANAGE_ISSUES;
+    await userRepo.save(friend);
+
+    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const res = await agent.post(`/issue/${issue.id}/media/search`);
+
+    assert.strictEqual(res.status, 204);
+    assert.strictEqual(searchMediaReleaseMock.callCount(), 1);
+  });
+
+  it('prevents users who cannot report issues from searching', async () => {
+    const userRepo = getRepository(User);
+    const media = await seedMedia({ serviceId: 0, externalServiceId: 4 });
+    const issue = await seedIssue(media);
+    const friend = await userRepo.findOneOrFail({
+      where: { email: 'friend@seerr.dev' },
+    });
+
+    friend.permissions = Permission.REQUEST;
     await userRepo.save(friend);
 
     const agent = await loginAs('friend@seerr.dev', 'test1234');
