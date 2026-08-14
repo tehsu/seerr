@@ -1,19 +1,9 @@
-import RadarrAPI from '@server/api/servarr/radarr';
-import SonarrAPI from '@server/api/servarr/sonarr';
 import TheMovieDb from '@server/api/themoviedb';
 import { MediaType } from '@server/constants/media';
 import type Media from '@server/entity/Media';
-import { getSettings } from '@server/lib/settings';
+import { getRadarrForMedia, getSonarrForMedia } from '@server/lib/mediaService';
 
-export class MediaServiceNotConfiguredError extends Error {
-  public readonly arrName: string;
-
-  constructor(arrName: string) {
-    super(`No ${arrName} server configured to delete media files`);
-    this.name = 'MediaServiceNotConfiguredError';
-    this.arrName = arrName;
-  }
-}
+export { MediaServiceNotConfiguredError } from '@server/lib/mediaService';
 
 /**
  * Removes a media item, along with its files, from the Radarr/Sonarr server
@@ -23,54 +13,14 @@ export class MediaServiceNotConfiguredError extends Error {
  * server the item belongs to.
  */
 const deleteMediaFile = async (media: Media, is4k = false): Promise<void> => {
-  const settings = getSettings();
-  const isMovie = media.mediaType === MediaType.MOVIE;
-  const specificServiceId = is4k ? media.serviceId4k : media.serviceId;
-  const hasSpecificServiceId =
-    specificServiceId != null && specificServiceId >= 0;
-
-  if (isMovie) {
-    let serviceSettings = settings.radarr.find(
-      (radarr) => radarr.isDefault && radarr.is4k === is4k
-    );
-
-    if (hasSpecificServiceId && serviceSettings?.id !== specificServiceId) {
-      serviceSettings = settings.radarr.find(
-        (radarr) => radarr.id === specificServiceId
-      );
-    }
-
-    if (!serviceSettings) {
-      throw new MediaServiceNotConfiguredError(`${is4k ? '4K ' : ''}Radarr`);
-    }
-
-    const radarr = new RadarrAPI({
-      apiKey: serviceSettings.apiKey,
-      url: RadarrAPI.buildUrl(serviceSettings, '/api/v3'),
-    });
+  if (media.mediaType === MediaType.MOVIE) {
+    const radarr = getRadarrForMedia(media, is4k);
 
     await radarr.removeMovie(media.tmdbId);
     return;
   }
 
-  let serviceSettings = settings.sonarr.find(
-    (sonarr) => sonarr.isDefault && sonarr.is4k === is4k
-  );
-
-  if (hasSpecificServiceId && serviceSettings?.id !== specificServiceId) {
-    serviceSettings = settings.sonarr.find(
-      (sonarr) => sonarr.id === specificServiceId
-    );
-  }
-
-  if (!serviceSettings) {
-    throw new MediaServiceNotConfiguredError(`${is4k ? '4K ' : ''}Sonarr`);
-  }
-
-  const sonarr = new SonarrAPI({
-    apiKey: serviceSettings.apiKey,
-    url: SonarrAPI.buildUrl(serviceSettings, '/api/v3'),
-  });
+  const sonarr = getSonarrForMedia(media, is4k);
 
   const tmdb = new TheMovieDb();
   const series = await tmdb.getTvShow({ tvId: media.tmdbId });

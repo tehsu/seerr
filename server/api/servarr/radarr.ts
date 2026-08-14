@@ -257,7 +257,7 @@ class RadarrAPI extends ServarrBase<{ movieId: number }> {
     });
 
     try {
-      await this.runCommand('MoviesSearch', { movieIds: [movieId] });
+      await this.searchMovieReleases(movieId);
     } catch (e) {
       logger.error(
         'Something went wrong while executing Radarr movie search.',
@@ -268,6 +268,17 @@ class RadarrAPI extends ServarrBase<{ movieId: number }> {
         }
       );
     }
+  }
+
+  /**
+   * Runs the same search as searchMovie, but hands failures to the caller
+   * instead of only logging them.
+   *
+   * Radarr keeps the file it already has unless the search turns up a release
+   * that its quality profile considers an upgrade.
+   */
+  public async searchMovieReleases(movieId: number): Promise<void> {
+    await this.runCommand('MoviesSearch', { movieIds: [movieId] });
   }
   public removeMovie = async (tmdbId: number): Promise<void> => {
     const { id, title } = await this.getMovieByTmdbId(tmdbId);
