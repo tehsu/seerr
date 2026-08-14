@@ -12,6 +12,7 @@ import type {
 import deleteMediaFile, {
   MediaServiceNotConfiguredError,
 } from '@server/lib/mediaDeletion';
+import restartMediaSearch from '@server/lib/mediaSearchRestart';
 import { Permission } from '@server/lib/permissions';
 import logger from '@server/logger';
 import { isAuthenticated } from '@server/middleware/auth';
@@ -397,11 +398,16 @@ issueRoutes.delete<{ issueId: string }>(
   async (req, res, next) => {
     const issueRepository = getRepository(Issue);
     const mediaRepository = getRepository(Media);
+    // Satisfy typescript here. User is set, we assure you!
+    if (!req.user) {
+      return next({ status: 500, message: 'User missing from request.' });
+    }
 
+    let issue: Issue;
     let media: Media;
 
     try {
-      const issue = await issueRepository.findOneOrFail({
+      issue = await issueRepository.findOneOrFail({
         where: { id: Number(req.params.issueId) },
         relations: { media: true },
       });
@@ -430,6 +436,20 @@ issueRoutes.delete<{ issueId: string }>(
       versions.push(true);
     }
 
+    if (!versions.length) {
+      // Without a Radarr/Sonarr server there are no files for us to delete and
+      // nothing to search for again, so clearing the record is all we can do.
+      // Removing the media also removes any issues attached to it.
+      if (media.status === MediaStatus.BLOCKLISTED) {
+        media.resetServiceData();
+        await mediaRepository.save(media);
+      } else {
+        await mediaRepository.remove(media);
+      }
+
+      return res.status(204).send();
+    }
+
     try {
       for (const is4k of versions) {
         await deleteMediaFile(media, is4k);
@@ -451,13 +471,42 @@ issueRoutes.delete<{ issueId: string }>(
       });
     }
 
-    // Removing the media also removes any issues attached to it
     if (media.status === MediaStatus.BLOCKLISTED) {
+      // Blocklisted media is meant to stay gone, so it never gets searched for
+      // again.
       media.resetServiceData();
       await mediaRepository.save(media);
     } else {
-      await mediaRepository.remove(media);
+      // Deleting the files on their own would leave everyone without the media
+      // the issue was reported against, so go looking for a replacement.
+      try {
+        for (const is4k of versions) {
+          await restartMediaSearch(media, is4k, req.user);
+        }
+      } catch (e) {
+        logger.error(
+          'Deleted the media files for an issue, but failed to search for the media again.',
+          {
+            label: 'Issue',
+            errorMessage: e.message,
+            issueId: Number(req.params.issueId),
+            mediaId: media.id,
+          }
+        );
+
+        return next({
+          status: 500,
+          message:
+            'The media files were deleted, but the search could not be restarted.',
+        });
+      }
     }
+
+    // The media the issue was reported against is gone, so the issue itself has
+    // been dealt with.
+    issue.status = IssueStatus.RESOLVED;
+    issue.modifiedBy = req.user;
+    await issueRepository.save(issue);
 
     return res.status(204).send();
   }

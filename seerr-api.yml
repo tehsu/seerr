@@ -7815,7 +7815,9 @@ paths:
     delete:
       summary: Delete the media an issue was reported against
       description: |
-        Removes the media item an issue was reported against from its Radarr/Sonarr server (including any files), then deletes the media from Seerr. Deleting the media also deletes any issues reported against it.
+        Removes the media item an issue was reported against from its Radarr/Sonarr server (including any files), then requests it again so Radarr/Sonarr searches for a replacement, and resolves the issue.
+
+        Blocklisted media is not searched for again. Media that no Radarr/Sonarr server manages has no files for Seerr to delete, so it is simply removed from Seerr instead; removing the media also deletes any issues reported against it.
 
         Requires the `MANAGE_ISSUES` and `MANAGE_REQUESTS` permissions, or `ADMIN`.
       tags:
