@@ -268,6 +268,17 @@ const CreateIssueModal = ({
                         id="problemSeason"
                         name="problemSeason"
                         disabled={availableSeasons.length === 1}
+                        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+                          // A select always hands back a string, but the API
+                          // expects a number.
+                          setFieldValue(
+                            'problemSeason',
+                            Number(e.target.value)
+                          );
+                          // Episodes are numbered per season, so one picked for
+                          // the previous season means nothing here.
+                          setFieldValue('problemEpisode', 0);
+                        }}
                       >
                         {availableSeasons.length > 1 && (
                           <option value={0}>
@@ -302,6 +313,12 @@ const CreateIssueModal = ({
                           as="select"
                           id="problemEpisode"
                           name="problemEpisode"
+                          onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+                            setFieldValue(
+                              'problemEpisode',
+                              Number(e.target.value)
+                            )
+                          }
                         >
                           <option value={0}>
                             {intl.formatMessage(messages.allepisodes)}
@@ -310,8 +327,7 @@ const CreateIssueModal = ({
                             ...Array(
                               data.seasons.find(
                                 (season) =>
-                                  Number(values.problemSeason) ===
-                                  season.seasonNumber
+                                  values.problemSeason === season.seasonNumber
                               )?.episodeCount ?? 0
                             ),
                           ].map((i, index) => (
