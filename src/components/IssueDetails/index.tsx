@@ -73,10 +73,10 @@ const messages = defineMessages('components.IssueDetails', {
   unknownissuetype: 'Unknown',
   commentplaceholder: 'Add a comment…',
   deletionrequested: 'Deletion Requested',
-  deletemedia: 'Delete Media',
+  deletemedia: 'Delete & Search Again',
   deletemediatip:
-    'Removes the {mediaType} and its files from {arr}, then clears it from Seerr along with this issue.',
-  toastmediadeleted: 'Media deleted successfully!',
+    'Removes the {mediaType} and its files from {arr}, then searches for a replacement and resolves this issue.',
+  toastmediadeleted: 'Media deleted! Searching for a replacement now.',
   toastmediadeletefailed: 'Something went wrong while deleting the media.',
   movie: 'movie',
   series: 'series',

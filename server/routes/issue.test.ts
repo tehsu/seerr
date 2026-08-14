@@ -1,12 +1,18 @@
 import assert from 'node:assert/strict';
 import { before, beforeEach, describe, it, mock } from 'node:test';
 
-import { IssueType } from '@server/constants/issue';
-import { MediaStatus, MediaType } from '@server/constants/media';
+import { IssueStatus, IssueType } from '@server/constants/issue';
+import {
+  MediaRequestStatus,
+  MediaStatus,
+  MediaType,
+} from '@server/constants/media';
 import { getRepository } from '@server/datasource';
 import Issue from '@server/entity/Issue';
 import Media from '@server/entity/Media';
+import { MediaRequest } from '@server/entity/MediaRequest';
 import { User } from '@server/entity/User';
+import * as mediaDeletion from '@server/lib/mediaDeletion';
 import { Permission } from '@server/lib/permissions';
 import { getSettings } from '@server/lib/settings';
 import { checkUser } from '@server/middleware/auth';
@@ -25,6 +31,23 @@ const sendIssueNotificationMock = mock.method(
   },
   'sendIssueNotification',
   async () => undefined
+).mock;
+
+const sendNotificationMock = mock.method(
+  MediaRequest,
+  'sendNotification',
+  async () => undefined
+).mock;
+
+// Talking to Radarr/Sonarr is covered by the media deletion tests, so the
+// deletion itself is stubbed out here unless a test asks for the real thing.
+const deleteMediaFile = mediaDeletion.default;
+let deleteMediaFileImpl: typeof deleteMediaFile = async () => undefined;
+
+const deleteMediaFileMock = mock.method(
+  mediaDeletion,
+  'default',
+  (media: Media, is4k?: boolean) => deleteMediaFileImpl(media, is4k)
 ).mock;
 
 let app: Express;
@@ -64,6 +87,9 @@ before(async () => {
 
 beforeEach(() => {
   sendIssueNotificationMock.resetCalls();
+  sendNotificationMock.resetCalls();
+  deleteMediaFileMock.resetCalls();
+  deleteMediaFileImpl = async () => undefined;
 });
 
 setupTestDb();
@@ -106,6 +132,23 @@ async function seedIssue(media: Media) {
       media,
       createdBy,
       deletionRequested: true,
+    })
+  );
+}
+
+async function seedRequest(media: Media, is4k = false) {
+  const requestedBy = await getRepository(User).findOneOrFail({
+    where: { email: 'friend@seerr.dev' },
+  });
+
+  return getRepository(MediaRequest).save(
+    new MediaRequest({
+      type: media.mediaType,
+      media,
+      requestedBy,
+      status: MediaRequestStatus.COMPLETED,
+      is4k,
+      seasons: [],
     })
   );
 }
@@ -290,7 +333,7 @@ describe('DELETE /issue/:issueId/media', () => {
     );
   });
 
-  it('removes the media, and the issue along with it', async () => {
+  it('removes media no Radarr/Sonarr server manages, and the issue along with it', async () => {
     const media = await seedMedia();
     const issue = await seedIssue(media);
 
@@ -298,6 +341,7 @@ describe('DELETE /issue/:issueId/media', () => {
     const res = await agent.delete(`/issue/${issue.id}/media`);
 
     assert.strictEqual(res.status, 204);
+    assert.strictEqual(deleteMediaFileMock.callCount(), 0);
     assert.strictEqual(
       await getRepository(Media).findOne({ where: { id: media.id } }),
       null
@@ -308,7 +352,94 @@ describe('DELETE /issue/:issueId/media', () => {
     );
   });
 
+  it('deletes the files, searches for the media again and resolves the issue', async () => {
+    const media = await seedMedia({ serviceId: 0, externalServiceId: 4 });
+    const issue = await seedIssue(media);
+    const mediaRequest = await seedRequest(media);
+
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
+    const res = await agent.delete(`/issue/${issue.id}/media`);
+
+    assert.strictEqual(res.status, 204);
+    assert.strictEqual(deleteMediaFileMock.callCount(), 1);
+
+    const persistedMedia = await getRepository(Media).findOneOrFail({
+      where: { id: media.id },
+    });
+    assert.strictEqual(persistedMedia.serviceId, null);
+    assert.strictEqual(persistedMedia.externalServiceId, null);
+    assert.strictEqual(persistedMedia.status, MediaStatus.PROCESSING);
+
+    const persistedRequest = await getRepository(MediaRequest).findOneOrFail({
+      where: { id: mediaRequest.id },
+    });
+    assert.strictEqual(persistedRequest.status, MediaRequestStatus.APPROVED);
+
+    const persistedIssue = await getRepository(Issue).findOneOrFail({
+      where: { id: issue.id },
+    });
+    assert.strictEqual(persistedIssue.status, IssueStatus.RESOLVED);
+    assert.strictEqual(persistedIssue.modifiedBy?.email, 'admin@seerr.dev');
+  });
+
+  it('deletes both versions of the media and searches for each of them', async () => {
+    const media = await seedMedia({
+      serviceId: 0,
+      serviceId4k: 1,
+      status4k: MediaStatus.AVAILABLE,
+    });
+    const issue = await seedIssue(media);
+
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
+    const res = await agent.delete(`/issue/${issue.id}/media`);
+
+    assert.strictEqual(res.status, 204);
+    assert.deepStrictEqual(
+      deleteMediaFileMock.calls.map((call) => call.arguments[1]),
+      [false, true]
+    );
+
+    const requests = await getRepository(MediaRequest).find({
+      where: { media: { id: media.id } },
+    });
+    assert.deepStrictEqual(requests.map((request) => request.is4k).sort(), [
+      false,
+      true,
+    ]);
+    requests.forEach((request) => {
+      assert.strictEqual(request.status, MediaRequestStatus.APPROVED);
+    });
+  });
+
+  it('does not search again for blocklisted media', async () => {
+    const media = await seedMedia({
+      serviceId: 0,
+      status: MediaStatus.BLOCKLISTED,
+      status4k: MediaStatus.BLOCKLISTED,
+    });
+    const issue = await seedIssue(media);
+
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
+    const res = await agent.delete(`/issue/${issue.id}/media`);
+
+    assert.strictEqual(res.status, 204);
+    assert.strictEqual(deleteMediaFileMock.callCount(), 1);
+
+    const persistedMedia = await getRepository(Media).findOneOrFail({
+      where: { id: media.id },
+    });
+    assert.strictEqual(persistedMedia.serviceId, null);
+    assert.strictEqual(persistedMedia.status, MediaStatus.BLOCKLISTED);
+    assert.strictEqual(
+      await getRepository(MediaRequest).count({
+        where: { media: { id: media.id } },
+      }),
+      0
+    );
+  });
+
   it('keeps the media when its Radarr/Sonarr server is not configured', async () => {
+    deleteMediaFileImpl = deleteMediaFile;
     const media = await seedMedia({ serviceId: 1 });
     const issue = await seedIssue(media);
 
@@ -320,6 +451,10 @@ describe('DELETE /issue/:issueId/media', () => {
       await getRepository(Media).findOne({ where: { id: media.id } }),
       null
     );
+    const persistedIssue = await getRepository(Issue).findOneOrFail({
+      where: { id: issue.id },
+    });
+    assert.strictEqual(persistedIssue.status, IssueStatus.OPEN);
   });
 
   it('returns 404 for a non-existent issue', async () => {
