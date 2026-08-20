@@ -3,6 +3,7 @@ import { afterEach, describe, it, mock } from 'node:test';
 
 import type { AxiosInstance } from 'axios';
 
+import type { AddSeriesOptions } from '@server/api/servarr/sonarr';
 import SonarrAPI from '@server/api/servarr/sonarr';
 
 function buildSonarr(): SonarrAPI {
@@ -11,6 +12,22 @@ function buildSonarr(): SonarrAPI {
 
 function getAxios(sonarr: SonarrAPI): AxiosInstance {
   return (sonarr as unknown as { axios: AxiosInstance }).axios;
+}
+
+function addSeriesOptions(
+  overrides: Partial<AddSeriesOptions> = {}
+): AddSeriesOptions {
+  return {
+    tvdbid: 1234,
+    title: 'Test Series',
+    profileId: 1,
+    seasons: [],
+    seasonFolder: true,
+    rootFolderPath: '/tv',
+    seriesType: 'standard',
+    monitored: true,
+    ...overrides,
+  };
 }
 
 describe('SonarrAPI removeSeries', () => {
@@ -115,5 +132,162 @@ describe('SonarrAPI getSeriesByTvdbId', () => {
     await assert.rejects(() => sonarr.getSeriesByTvdbId(1234), {
       message: 'Series not found',
     });
+  });
+});
+
+describe('SonarrAPI addSeries individually requested episodes', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('monitors and searches only the matched episodes on a brand-new series', async () => {
+    const sonarr = buildSonarr();
+    const axios = getAxios(sonarr);
+
+    mock.method(axios, 'get', async (url: string) => {
+      if (url === '/series/lookup') {
+        return {
+          data: [
+            {
+              seasons: [
+                { seasonNumber: 1, monitored: false },
+                { seasonNumber: 2, monitored: false },
+              ],
+            },
+          ],
+        };
+      }
+      if (url === '/episode') {
+        return {
+          data: [
+            { id: 501, seasonNumber: 2, episodeNumber: 5 },
+            { id: 502, seasonNumber: 2, episodeNumber: 6 },
+          ],
+        };
+      }
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    const post = mock.method(axios, 'post', async (url: string) => {
+      if (url === '/series') {
+        return { data: { id: 99, seasons: [] } };
+      }
+      return { data: {} };
+    });
+    const put = mock.method(axios, 'put', async () => ({ data: {} }));
+
+    await sonarr.addSeries(
+      addSeriesOptions({
+        episodes: [{ seasonNumber: 2, episodeNumbers: [5] }],
+        searchNow: true,
+      })
+    );
+
+    const monitorCall = put.mock.calls.find(
+      (c) => c.arguments[0] === '/episode/monitor'
+    );
+    assert.ok(monitorCall, 'expected a call to /episode/monitor');
+    assert.deepStrictEqual(monitorCall?.arguments[1], {
+      episodeIds: [501],
+      monitored: true,
+    });
+
+    const searchCall = post.mock.calls.find(
+      (c) => c.arguments[0] === '/command'
+    );
+    assert.ok(searchCall, 'expected a call to /command');
+    assert.deepStrictEqual(searchCall?.arguments[1], {
+      name: 'EpisodeSearch',
+      episodeIds: [501],
+    });
+  });
+
+  it('monitors and searches the matched episodes on a series already in Sonarr', async () => {
+    const sonarr = buildSonarr();
+    const axios = getAxios(sonarr);
+
+    mock.method(axios, 'get', async (url: string) => {
+      if (url === '/series/lookup') {
+        return {
+          data: [
+            {
+              id: 42,
+              tags: [],
+              seasons: [{ seasonNumber: 2, monitored: true }],
+            },
+          ],
+        };
+      }
+      if (url === '/episode') {
+        return {
+          data: [
+            { id: 700, seasonNumber: 3, episodeNumber: 1, monitored: false },
+          ],
+        };
+      }
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    const put = mock.method(axios, 'put', async (url: string) => {
+      if (url === '/series') {
+        return {
+          data: { id: 42, seasons: [{ seasonNumber: 2, monitored: true }] },
+        };
+      }
+      return { data: {} };
+    });
+    const post = mock.method(axios, 'post', async () => ({ data: {} }));
+
+    await sonarr.addSeries(
+      addSeriesOptions({
+        seasons: [2],
+        episodes: [{ seasonNumber: 3, episodeNumbers: [1] }],
+        searchNow: false,
+      })
+    );
+
+    const monitorCall = put.mock.calls.find(
+      (c) => c.arguments[0] === '/episode/monitor'
+    );
+    assert.ok(monitorCall, 'expected a call to /episode/monitor');
+    assert.deepStrictEqual(monitorCall?.arguments[1], {
+      episodeIds: [700],
+      monitored: true,
+    });
+
+    // searchNow is false, so no EpisodeSearch command should have run.
+    assert.strictEqual(
+      post.mock.calls.some((c) => c.arguments[0] === '/command'),
+      false
+    );
+  });
+
+  it('does not fail the add when none of the requested episodes are known to Sonarr yet', async () => {
+    const sonarr = buildSonarr();
+    const axios = getAxios(sonarr);
+
+    mock.method(axios, 'get', async (url: string) => {
+      if (url === '/series/lookup') {
+        return { data: [{ seasons: [{ seasonNumber: 1, monitored: false }] }] };
+      }
+      if (url === '/episode') {
+        return { data: [] };
+      }
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    mock.method(axios, 'post', async (url: string) =>
+      url === '/series' ? { data: { id: 7, seasons: [] } } : { data: {} }
+    );
+    const put = mock.method(axios, 'put', async () => ({ data: {} }));
+
+    await assert.doesNotReject(() =>
+      sonarr.addSeries(
+        addSeriesOptions({
+          episodes: [{ seasonNumber: 1, episodeNumbers: [1] }],
+          searchNow: true,
+        })
+      )
+    );
+
+    assert.strictEqual(
+      put.mock.calls.some((c) => c.arguments[0] === '/episode/monitor'),
+      false
+    );
   });
 });

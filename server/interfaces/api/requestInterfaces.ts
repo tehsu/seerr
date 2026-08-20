@@ -18,6 +18,13 @@ export type MediaRequestBody = {
   mediaId: number;
   tvdbId?: number;
   seasons?: number[] | 'all';
+  /**
+   * Narrows a season in `seasons` down to specific episodes instead of requesting it in
+   * full. A season number listed here that is not also in `seasons` has no effect; a
+   * season in `seasons` with no matching entry here is requested in full, exactly as
+   * when this field is omitted.
+   */
+  episodes?: { seasonNumber: number; episodeNumbers: number[] }[];
   is4k?: boolean;
   serverId?: number;
   profileId?: number;

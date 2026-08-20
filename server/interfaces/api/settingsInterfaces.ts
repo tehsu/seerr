@@ -79,4 +79,10 @@ export interface StatusResponse {
   updateAvailable?: boolean;
   commitsBehind?: number;
   restartRequired: boolean;
+  /**
+   * Capabilities this fork adds on top of upstream Seerr, absent from a stock server.
+   * Lets a client feature-detect a fork-only capability instead of guessing from a
+   * version string, so it can degrade cleanly against the public release.
+   */
+  forkFeatures: string[];
 }

@@ -5,6 +5,7 @@ import type {
   TmdbMovieResult,
   TmdbTvResult,
 } from '@server/api/themoviedb/interfaces';
+import { FORK_FEATURES } from '@server/constants/forkFeatures';
 import { getRepository } from '@server/datasource';
 import DiscoverSlider from '@server/entity/DiscoverSlider';
 import type { StatusResponse } from '@server/interfaces/api/settingsInterfaces';
@@ -98,6 +99,7 @@ router.get<unknown, StatusResponse>('/status', async (req, res) => {
     commitTag: getCommitTag(),
     ...(checkUpdate && { updateAvailable, commitsBehind }),
     restartRequired: restartFlag.isSet(),
+    forkFeatures: [...FORK_FEATURES],
   });
 });
 

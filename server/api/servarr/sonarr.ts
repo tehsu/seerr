@@ -89,12 +89,24 @@ export interface SonarrSeries {
   };
 }
 
+/** One season's worth of specific episode numbers, out of a `seasons` list request left them out of. */
+export interface RequestedSeasonEpisodes {
+  seasonNumber: number;
+  episodeNumbers: number[];
+}
+
 export interface AddSeriesOptions {
   tvdbid: number;
   title: string;
   profileId: number;
   languageProfileId?: number;
   seasons: number[];
+  /**
+   * Episodes to monitor and search individually, within seasons that `seasons` does not
+   * cover in full — the counterpart to a request that named specific episodes rather
+   * than a whole season.
+   */
+  episodes?: RequestedSeasonEpisodes[];
   seasonFolder: boolean;
   rootFolderPath: string;
   tags?: number[];
@@ -246,6 +258,12 @@ class SonarrAPI extends ServarrBase<{
             });
           }
 
+          await this.monitorRequestedEpisodes(
+            newSeriesResponse.data.id,
+            options.episodes,
+            options.searchNow
+          );
+
           if (options.searchNow) {
             this.searchSeries(newSeriesResponse.data.id);
           }
@@ -294,6 +312,12 @@ class SonarrAPI extends ServarrBase<{
           label: 'Sonarr',
           series: createdSeriesResponse.data,
         });
+
+        await this.monitorRequestedEpisodes(
+          createdSeriesResponse.data.id,
+          options.episodes,
+          options.searchNow
+        );
       } else {
         logger.error('Failed to add series to Sonarr', {
           label: 'Sonarr',
@@ -415,6 +439,61 @@ class SonarrAPI extends ServarrBase<{
         episodeIds,
       });
       throw new Error('Failed to monitor episodes', { cause: e });
+    }
+  }
+
+  /**
+   * Monitors, and optionally searches, exactly the episodes a request named — the
+   * counterpart to `buildSeasonList`, which only ever deals in whole seasons. Sonarr
+   * assigns episode ids on its own once a series is in its library, so these have to be
+   * looked up by season/episode number after the fact rather than sent up front.
+   *
+   * Failures are logged and swallowed: the series itself is already added by this
+   * point, and the whole-season part of the same request (if any) has already gone
+   * through, so a hiccup here should not fail the request outright.
+   */
+  private async monitorRequestedEpisodes(
+    seriesId: number,
+    episodes: RequestedSeasonEpisodes[] | undefined,
+    searchNow?: boolean
+  ): Promise<void> {
+    if (!episodes || episodes.length === 0) {
+      return;
+    }
+
+    try {
+      const seriesEpisodes = await this.getEpisodes(seriesId);
+      const episodeIds = seriesEpisodes
+        .filter((episode) =>
+          episodes.some(
+            (season) =>
+              season.seasonNumber === episode.seasonNumber &&
+              season.episodeNumbers.includes(episode.episodeNumber)
+          )
+        )
+        .map((episode) => episode.id);
+
+      if (episodeIds.length === 0) {
+        logger.warn('None of the requested episodes were found in Sonarr', {
+          label: 'Sonarr',
+          seriesId,
+          episodes,
+        });
+        return;
+      }
+
+      await this.monitorEpisodes(episodeIds);
+
+      if (searchNow) {
+        await this.searchEpisodeReleases(episodeIds);
+      }
+    } catch (e) {
+      logger.warn('Failed to monitor individually requested episodes', {
+        label: 'Sonarr',
+        errorMessage: e.message,
+        seriesId,
+        episodes,
+      });
     }
   }
 

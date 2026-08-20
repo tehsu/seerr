@@ -701,13 +701,28 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
           }
         }
 
+        // A season with specific episode numbers on it was only ever asked for those
+        // episodes, not the whole season — so it stays out of the whole-season list
+        // Sonarr monitors and searches, and is handled by `episodes` instead once the
+        // series exists.
+        const wholeSeasons = entity.seasons.filter(
+          (season) => !season.episodes || season.episodes.length === 0
+        );
+        const partialSeasons = entity.seasons
+          .filter((season) => season.episodes && season.episodes.length > 0)
+          .map((season) => ({
+            seasonNumber: season.seasonNumber,
+            episodeNumbers: season.episodes as number[],
+          }));
+
         const sonarrSeriesOptions: AddSeriesOptions = {
           profileId: qualityProfile,
           languageProfileId: languageProfile,
           rootFolderPath: rootFolder,
           title: series.name,
           tvdbid: tvdbId,
-          seasons: entity.seasons.map((season) => season.seasonNumber),
+          seasons: wholeSeasons.map((season) => season.seasonNumber),
+          episodes: partialSeasons,
           seasonFolder: sonarrSettings.enableSeasonFolders,
           seriesType,
           tags,

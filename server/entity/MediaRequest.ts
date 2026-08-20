@@ -466,6 +466,13 @@ export class MediaRequest {
         (rs) => !existingSeasons.includes(rs)
       );
 
+      const episodesBySeason = new Map<number, number[]>(
+        (requestBody.episodes ?? []).map((entry) => [
+          entry.seasonNumber,
+          entry.episodeNumbers,
+        ])
+      );
+
       if (finalSeasons.length === 0) {
         throw new NoSeasonsAvailableError('No seasons available to request');
       } else if (
@@ -521,6 +528,7 @@ export class MediaRequest {
           (sn) =>
             new SeasonRequest({
               seasonNumber: sn,
+              episodes: episodesBySeason.get(sn),
               status: user.hasPermission(
                 [
                   requestBody.is4k
