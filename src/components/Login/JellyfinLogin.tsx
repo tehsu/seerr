@@ -72,11 +72,24 @@ const JellyfinLogin = ({ revalidate, serverType }: JellyfinLoginProps) => {
     ),
     password: Yup.string(),
   });
-  const baseUrl = settings.currentSettings.jellyfinExternalHost
-    ? settings.currentSettings.jellyfinExternalHost
-    : settings.currentSettings.jellyfinHost;
-  const jellyfinForgotPasswordUrl =
-    settings.currentSettings.jellyfinForgotPasswordUrl;
+  // The server may be the primary media server or an additional login server
+  // configured alongside it, which has its own external URL
+  const isPrimaryServer =
+    serverType === settings.currentSettings.mediaServerType;
+  const loginServer = isPrimaryServer
+    ? undefined
+    : serverType === MediaServerType.JELLYFIN
+      ? settings.currentSettings.loginServers?.jellyfin
+      : serverType === MediaServerType.EMBY
+        ? settings.currentSettings.loginServers?.emby
+        : undefined;
+  const baseUrl = isPrimaryServer
+    ? settings.currentSettings.jellyfinExternalHost ||
+      settings.currentSettings.jellyfinHost
+    : loginServer?.externalHostname;
+  const jellyfinForgotPasswordUrl = isPrimaryServer
+    ? settings.currentSettings.jellyfinForgotPasswordUrl
+    : loginServer?.forgotPasswordUrl;
 
   return (
     <div>
@@ -93,6 +106,7 @@ const JellyfinLogin = ({ revalidate, serverType }: JellyfinLoginProps) => {
               username: values.username,
               password: values.password,
               email: values.username,
+              serverType,
             });
           } catch (e) {
             let errorMessage = messages.loginerror;
@@ -184,8 +198,7 @@ const JellyfinLogin = ({ revalidate, serverType }: JellyfinLoginProps) => {
                             jellyfinForgotPasswordUrl
                               ? `${jellyfinForgotPasswordUrl}`
                               : `${baseUrl}/web/index.html#!/${
-                                  settings.currentSettings.mediaServerType ===
-                                  MediaServerType.EMBY
+                                  serverType === MediaServerType.EMBY
                                     ? 'startup/'
                                     : ''
                                 }forgotpassword.html`

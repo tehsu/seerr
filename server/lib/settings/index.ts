@@ -2,6 +2,8 @@ import { MediaServerType } from '@server/constants/server';
 import { Permission } from '@server/lib/permissions';
 import { runMigrations } from '@server/lib/settings/migrator';
 import type { AvailableLocale } from '@server/types/languages';
+import type { LoginServerType } from '@server/utils/loginServers';
+import { getLoginServer } from '@server/utils/loginServers';
 import { randomBytes, randomUUID } from 'crypto';
 import fs from 'fs/promises';
 import { mergeWith } from 'lodash';
@@ -56,6 +58,38 @@ export interface JellyfinSettings {
   serverId: string;
   apiKey: string;
 }
+
+/**
+ * A Jellyfin or Emby server that users can sign in with, in addition to the
+ * primary media server. It is only used for authentication; libraries are
+ * still scanned from the primary media server.
+ */
+export interface LoginServerSettings {
+  enabled: boolean;
+  ip: string;
+  port: number;
+  useSsl: boolean;
+  urlBase: string;
+  externalHostname: string;
+  forgotPasswordUrl: string;
+}
+
+export interface LoginServersSettings {
+  jellyfin: LoginServerSettings;
+  emby: LoginServerSettings;
+}
+
+export interface PublicLoginServerSettings {
+  enabled: boolean;
+  externalHostname?: string;
+  forgotPasswordUrl?: string;
+}
+
+export interface PublicLoginServersSettings {
+  jellyfin: PublicLoginServerSettings;
+  emby: PublicLoginServerSettings;
+}
+
 export interface TautulliSettings {
   hostname?: string;
   port?: number;
@@ -141,8 +175,10 @@ export interface MainSettings {
   };
   hideAvailable: boolean;
   hideBlocklisted: boolean;
+  hideRequested: boolean;
   localLogin: boolean;
   mediaServerLogin: boolean;
+  loginServers: LoginServersSettings;
   newPlexLogin: boolean;
   discoverRegion: string;
   streamingRegion: string;
@@ -194,6 +230,7 @@ interface FullPublicSettings extends PublicSettings {
   applicationUrl: string;
   hideAvailable: boolean;
   hideBlocklisted: boolean;
+  hideRequested: boolean;
   localLogin: boolean;
   mediaServerLogin: boolean;
   movie4kEnabled: boolean;
@@ -205,6 +242,7 @@ interface FullPublicSettings extends PublicSettings {
   jellyfinExternalHost?: string;
   jellyfinForgotPasswordUrl?: string;
   jellyfinServerName?: string;
+  loginServers: PublicLoginServersSettings;
   partialRequestsEnabled: boolean;
   enableSpecialEpisodes: boolean;
   cacheImages: boolean;
@@ -312,6 +350,7 @@ export interface NotificationAgentNtfy extends NotificationAgentConfig {
   options: {
     url: string;
     topic: string;
+    tags?: string;
     authMethodUsernamePassword?: boolean;
     username?: string;
     password?: string;
@@ -390,6 +429,16 @@ export interface AllSettings {
   migrations: string[];
 }
 
+const defaultLoginServerSettings: LoginServerSettings = {
+  enabled: false,
+  ip: '',
+  port: 8096,
+  useSsl: false,
+  urlBase: '',
+  externalHostname: '',
+  forgotPasswordUrl: '',
+};
+
 const SETTINGS_PATH = process.env.CONFIG_DIRECTORY
   ? `${process.env.CONFIG_DIRECTORY}/settings.json`
   : path.join(__dirname, '../../../config/settings.json');
@@ -416,8 +465,13 @@ class Settings {
         },
         hideAvailable: false,
         hideBlocklisted: false,
+        hideRequested: false,
         localLogin: true,
         mediaServerLogin: true,
+        loginServers: {
+          jellyfin: { ...defaultLoginServerSettings },
+          emby: { ...defaultLoginServerSettings },
+        },
         newPlexLogin: true,
         discoverRegion: '',
         streamingRegion: '',
@@ -563,6 +617,7 @@ class Settings {
             options: {
               url: '',
               topic: '',
+              tags: '',
               priority: 3,
               locale: 'en',
             },
@@ -712,10 +767,15 @@ class Settings {
       applicationUrl: this.data.main.applicationUrl,
       hideAvailable: this.data.main.hideAvailable,
       hideBlocklisted: this.data.main.hideBlocklisted,
+      hideRequested: this.data.main.hideRequested,
       localLogin: this.data.main.localLogin,
       mediaServerLogin: this.data.main.mediaServerLogin,
       jellyfinExternalHost: this.data.jellyfin.externalHostname,
       jellyfinForgotPasswordUrl: this.data.jellyfin.jellyfinForgotPasswordUrl,
+      loginServers: {
+        jellyfin: this.getPublicLoginServer(MediaServerType.JELLYFIN),
+        emby: this.getPublicLoginServer(MediaServerType.EMBY),
+      },
       movie4kEnabled: this.data.radarr.some(
         (radarr) => radarr.is4k && radarr.isDefault
       ),
@@ -739,6 +799,18 @@ class Settings {
       youtubeUrl: this.data.main.youtubeUrl,
       versionCheck: this.data.main.versionCheck,
       plexClientIdentifier: this.data.clientId,
+    };
+  }
+
+  private getPublicLoginServer(
+    type: LoginServerType
+  ): PublicLoginServerSettings {
+    const server = getLoginServer(this.data.main, type);
+
+    return {
+      enabled: !!server,
+      externalHostname: server?.externalHostname,
+      forgotPasswordUrl: server?.forgotPasswordUrl,
     };
   }
 

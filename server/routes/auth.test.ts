@@ -12,6 +12,7 @@ import { getSettings } from '@server/lib/settings';
 import { checkUser } from '@server/middleware/auth';
 import { setupTestDb } from '@server/test/db';
 import { ApiError } from '@server/types/error';
+import axios from 'axios';
 import type { Express } from 'express';
 import express from 'express';
 import session from 'express-session';
@@ -21,6 +22,35 @@ import authRoutes from './auth';
 const emailMock = mock.method(PreparedEmail.prototype, 'send', async () => {
   return undefined;
 }).mock;
+
+// Avatar checks after a Jellyfin sign-in probe the media server; keep them
+// offline
+mock.method(axios, 'head', async () => {
+  throw new Error('offline');
+});
+
+// Jellyfin username/password sign-in mocks
+const defaultLoginResponse = {
+  User: {
+    Id: 'jf-login-user-001',
+    Name: 'jellyfinuser',
+    ServerId: 'server-2',
+    Policy: { IsAdministrator: false },
+  },
+  AccessToken: 'fake-login-access-token',
+};
+
+/** Hostnames the mocked Jellyfin sign-ins were sent to, in order */
+let loginHostnames: string[] = [];
+
+const loginMock = mock.method(
+  JellyfinAPI.prototype,
+  'login',
+  async function (this: JellyfinAPI) {
+    loginHostnames.push((this as unknown as { baseUrl: string }).baseUrl);
+    return { ...defaultLoginResponse };
+  }
+);
 
 // Jellyfin Quick Connect mocks
 const defaultInitiateResponse = {
@@ -118,15 +148,47 @@ async function authenticatedAgent(email: string, password: string) {
   return agent;
 }
 
+const disabledLoginServer = {
+  enabled: false,
+  ip: '',
+  port: 8096,
+  useSsl: false,
+  urlBase: '',
+  externalHostname: '',
+  forgotPasswordUrl: '',
+};
+
 /** Configure Jellyfin settings for testing QC */
 function configureJellyfin() {
   const settings = getSettings();
   settings.main.mediaServerType = MediaServerType.JELLYFIN;
+  settings.main.mediaServerLogin = true;
   settings.main.newPlexLogin = true;
+  settings.main.loginServers.jellyfin = { ...disabledLoginServer };
+  settings.main.loginServers.emby = { ...disabledLoginServer };
   settings.jellyfin.ip = 'localhost';
   settings.jellyfin.port = 8096;
   settings.jellyfin.useSsl = false;
   settings.jellyfin.urlBase = '';
+}
+
+/**
+ * Configure Plex as the primary media server, with an additional Jellyfin
+ * server enabled for sign-in
+ */
+function configurePlexWithJellyfinLoginServer() {
+  const settings = getSettings();
+  settings.main.mediaServerType = MediaServerType.PLEX;
+  settings.main.mediaServerLogin = true;
+  settings.main.newPlexLogin = true;
+  settings.main.loginServers.jellyfin = {
+    ...disabledLoginServer,
+    enabled: true,
+    ip: 'jellyfin.local',
+    port: 8097,
+  };
+  settings.main.loginServers.emby = { ...disabledLoginServer };
+  settings.jellyfin.ip = '';
 }
 
 describe('POST /auth/jellyfin/quickconnect/initiate', () => {
@@ -500,6 +562,264 @@ describe('POST /auth/jellyfin/quickconnect/authenticate', () => {
       .send({ secret: 'abc123def456abc123def456' });
 
     assert.strictEqual(res.status, 500);
+  });
+});
+
+describe('POST /auth/jellyfin with an additional login server', () => {
+  beforeEach(() => {
+    loginHostnames = [];
+    loginMock.mock.resetCalls();
+    loginMock.mock.mockImplementation(async function (this: JellyfinAPI) {
+      loginHostnames.push((this as unknown as { baseUrl: string }).baseUrl);
+      return { ...defaultLoginResponse };
+    });
+    configurePlexWithJellyfinLoginServer();
+  });
+
+  it('signs in a new user with the additional Jellyfin server', async () => {
+    const agent = request.agent(app);
+
+    const res = await agent.post('/auth/jellyfin').send({
+      username: 'jellyfinuser',
+      password: 'secret',
+      email: 'jellyfinuser',
+      serverType: MediaServerType.JELLYFIN,
+    });
+
+    assert.strictEqual(res.status, 200);
+    assert.ok('id' in res.body);
+    assert.ok(!('password' in res.body));
+    assert.strictEqual(loginMock.mock.callCount(), 1);
+    assert.deepStrictEqual(loginHostnames, ['http://jellyfin.local:8097']);
+
+    const userRepo = getRepository(User);
+    const newUser = await userRepo.findOneOrFail({
+      where: { jellyfinUserId: 'jf-login-user-001' },
+    });
+    assert.strictEqual(newUser.userType, UserType.JELLYFIN);
+    assert.strictEqual(newUser.jellyfinUsername, 'jellyfinuser');
+    assert.match(newUser.avatar, /^\/avatarproxy\/jf-login-user-001/);
+
+    const meRes = await agent.get('/auth/me');
+    assert.strictEqual(meRes.status, 200);
+    assert.strictEqual(meRes.body.jellyfinUsername, 'jellyfinuser');
+  });
+
+  it('signs in an existing user of the additional server', async () => {
+    const userRepo = getRepository(User);
+    await userRepo.save(
+      new User({
+        email: 'existing-jf@seerr.dev',
+        jellyfinUsername: 'oldname',
+        jellyfinUserId: 'jf-login-user-001',
+        permissions: 0,
+        avatar: '/avatarproxy/jf-login-user-001?v=0',
+        userType: UserType.JELLYFIN,
+      })
+    );
+
+    const res = await request(app).post('/auth/jellyfin').send({
+      username: 'jellyfinuser',
+      password: 'secret',
+      serverType: MediaServerType.JELLYFIN,
+    });
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(
+      await userRepo.count({ where: { jellyfinUserId: 'jf-login-user-001' } }),
+      1
+    );
+    const updatedUser = await userRepo.findOneOrFail({
+      where: { jellyfinUserId: 'jf-login-user-001' },
+    });
+    assert.strictEqual(updatedUser.jellyfinUsername, 'jellyfinuser');
+    assert.strictEqual(updatedUser.email, 'existing-jf@seerr.dev');
+  });
+
+  it('creates an Emby user when signing in with an additional Emby server', async () => {
+    const settings = getSettings();
+    settings.main.loginServers.emby = {
+      ...disabledLoginServer,
+      enabled: true,
+      ip: 'emby.local',
+      port: 8096,
+      useSsl: true,
+      urlBase: '/emby',
+    };
+    loginMock.mock.mockImplementation(async function (this: JellyfinAPI) {
+      loginHostnames.push((this as unknown as { baseUrl: string }).baseUrl);
+      return {
+        ...defaultLoginResponse,
+        User: { ...defaultLoginResponse.User, Id: 'emby-login-user-001' },
+      };
+    });
+
+    const res = await request(app).post('/auth/jellyfin').send({
+      username: 'jellyfinuser',
+      password: 'secret',
+      email: 'jellyfinuser',
+      serverType: MediaServerType.EMBY,
+    });
+
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(loginHostnames, ['https://emby.local:8096/emby']);
+
+    const newUser = await getRepository(User).findOneOrFail({
+      where: { jellyfinUserId: 'emby-login-user-001' },
+    });
+    assert.strictEqual(newUser.userType, UserType.EMBY);
+  });
+
+  it('returns 500 when no server type is given and the primary media server is Plex', async () => {
+    const res = await request(app)
+      .post('/auth/jellyfin')
+      .send({ username: 'jellyfinuser', password: 'secret' });
+
+    assert.strictEqual(res.status, 500);
+    assert.strictEqual(res.body.error, 'Jellyfin login is disabled');
+    assert.strictEqual(loginMock.mock.callCount(), 0);
+  });
+
+  it('returns 500 when the requested server is not enabled for sign-in', async () => {
+    const res = await request(app).post('/auth/jellyfin').send({
+      username: 'jellyfinuser',
+      password: 'secret',
+      serverType: MediaServerType.EMBY,
+    });
+
+    assert.strictEqual(res.status, 500);
+    assert.strictEqual(res.body.error, 'Jellyfin login is disabled');
+    assert.strictEqual(loginMock.mock.callCount(), 0);
+  });
+
+  it('returns 500 when the login server has no hostname configured', async () => {
+    getSettings().main.loginServers.jellyfin.ip = '';
+
+    const res = await request(app).post('/auth/jellyfin').send({
+      username: 'jellyfinuser',
+      password: 'secret',
+      serverType: MediaServerType.JELLYFIN,
+    });
+
+    assert.strictEqual(res.status, 500);
+    assert.strictEqual(loginMock.mock.callCount(), 0);
+  });
+
+  it('returns 403 for an unimported user when new sign-ins are disabled', async () => {
+    getSettings().main.newPlexLogin = false;
+
+    const res = await request(app).post('/auth/jellyfin').send({
+      username: 'jellyfinuser',
+      password: 'secret',
+      serverType: MediaServerType.JELLYFIN,
+    });
+
+    assert.strictEqual(res.status, 403);
+    assert.strictEqual(res.body.message, 'Access denied.');
+    assert.strictEqual(
+      await getRepository(User).count({
+        where: { jellyfinUserId: 'jf-login-user-001' },
+      }),
+      0
+    );
+  });
+
+  it('returns 403 during initial setup when no users exist', async () => {
+    await getRepository(User).clear();
+
+    const res = await request(app).post('/auth/jellyfin').send({
+      username: 'jellyfinuser',
+      password: 'secret',
+      serverType: MediaServerType.JELLYFIN,
+    });
+
+    assert.strictEqual(res.status, 403);
+    assert.match(res.body.message, /initial setup/i);
+    assert.strictEqual(loginMock.mock.callCount(), 0);
+  });
+
+  it('returns the Jellyfin error code when the credentials are invalid', async () => {
+    loginMock.mock.mockImplementation(async () => {
+      throw new ApiError(401, ApiErrorCode.InvalidCredentials);
+    });
+
+    const res = await request(app).post('/auth/jellyfin').send({
+      username: 'jellyfinuser',
+      password: 'wrong',
+      serverType: MediaServerType.JELLYFIN,
+    });
+
+    assert.strictEqual(res.status, 401);
+    assert.strictEqual(res.body.message, ApiErrorCode.InvalidCredentials);
+  });
+
+  it('uses the primary media server when the requested type matches it', async () => {
+    configureJellyfin();
+    getSettings().main.loginServers.jellyfin = {
+      ...disabledLoginServer,
+      enabled: true,
+      ip: 'jellyfin.local',
+      port: 8097,
+    };
+
+    const res = await request(app).post('/auth/jellyfin').send({
+      username: 'jellyfinuser',
+      password: 'secret',
+      email: 'jellyfinuser',
+      serverType: MediaServerType.JELLYFIN,
+    });
+
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(loginHostnames, ['http://localhost:8096']);
+  });
+});
+
+describe('Quick Connect with an additional Jellyfin login server', () => {
+  beforeEach(() => {
+    initiateQCMock.mock.resetCalls();
+    initiateQCMock.mock.mockImplementation(async () => ({
+      ...defaultInitiateResponse,
+    }));
+    authenticateQCMock.mock.resetCalls();
+    authenticateQCMock.mock.mockImplementation(async () => ({
+      ...defaultAuthenticateResponse,
+    }));
+    configurePlexWithJellyfinLoginServer();
+  });
+
+  it('initiates Quick Connect when Plex is the primary media server', async () => {
+    const res = await request(app).post('/auth/jellyfin/quickconnect/initiate');
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.code, '123456');
+    assert.strictEqual(initiateQCMock.mock.callCount(), 1);
+  });
+
+  it('returns 403 when the additional Jellyfin server is disabled', async () => {
+    getSettings().main.loginServers.jellyfin.enabled = false;
+
+    const res = await request(app).post('/auth/jellyfin/quickconnect/initiate');
+
+    assert.strictEqual(res.status, 403);
+    assert.strictEqual(initiateQCMock.mock.callCount(), 0);
+  });
+
+  it('creates a Jellyfin user on authentication', async () => {
+    const agent = request.agent(app);
+
+    const res = await agent
+      .post('/auth/jellyfin/quickconnect/authenticate')
+      .send({ secret: 'abc123def456abc123def456' });
+
+    assert.strictEqual(res.status, 200);
+
+    const newUser = await getRepository(User).findOneOrFail({
+      where: { jellyfinUserId: 'jf-qc-user-001' },
+    });
+    assert.strictEqual(newUser.userType, UserType.JELLYFIN);
+
+    const meRes = await agent.get('/auth/me');
+    assert.strictEqual(meRes.status, 200);
   });
 });
 

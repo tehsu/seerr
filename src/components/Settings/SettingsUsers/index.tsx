@@ -9,11 +9,17 @@ import useSettings from '@app/hooks/useSettings';
 import useToasts from '@app/hooks/useToasts';
 import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
+import { isValidURL } from '@app/utils/urlValidationHelper';
 import { ArrowDownOnSquareIcon } from '@heroicons/react/24/outline';
+import { ApiErrorCode } from '@server/constants/error';
 import { MediaServerType } from '@server/constants/server';
-import type { MainSettings } from '@server/lib/settings';
+import type {
+  LoginServerSettings,
+  LoginServersSettings,
+  MainSettings,
+} from '@server/lib/settings';
 import axios from 'axios';
-import { Field, Form, Formik } from 'formik';
+import { Field, Form, Formik, getIn } from 'formik';
 import { useIntl } from 'react-intl';
 import useSWR, { mutate } from 'swr';
 import * as yup from 'yup';
@@ -24,6 +30,8 @@ const messages = defineMessages('components.Settings.SettingsUsers', {
   userSettingsDescription: 'Configure global and default user settings.',
   toastSettingsSuccess: 'User settings saved successfully!',
   toastSettingsFailure: 'Something went wrong while saving settings.',
+  toastLoginServerConnectionFailure:
+    'Unable to connect to an additional sign-in server. Check its hostname, port and URL base.',
   loginMethods: 'Login Methods',
   loginMethodsTip: 'Configure login methods for users.',
   localLogin: 'Enable Local Sign-In',
@@ -32,6 +40,23 @@ const messages = defineMessages('components.Settings.SettingsUsers', {
   mediaServerLogin: 'Enable {mediaServerName} Sign-In',
   mediaServerLoginTip:
     'Allow users to sign in using their {mediaServerName} account',
+  loginServerTip:
+    'Allow users of an additional {mediaServerName} server to sign in using their {mediaServerName} account',
+  loginServerHostname: 'Hostname or IP Address',
+  loginServerPort: 'Port',
+  loginServerUseSsl: 'Use SSL',
+  loginServerUrlBase: 'URL Base',
+  loginServerExternalUrl: 'External URL',
+  loginServerForgotPasswordUrl: 'Forgot Password URL',
+  validationLoginServerHostnameRequired:
+    'You must provide a valid hostname or IP address',
+  validationLoginServerPortRequired: 'You must provide a valid port number',
+  validationLoginServerUrl: 'You must provide a valid URL',
+  validationLoginServerUrlTrailingSlash: 'URL must not end in a trailing slash',
+  validationLoginServerUrlBaseLeadingSlash:
+    'URL base must have a leading slash',
+  validationLoginServerUrlBaseTrailingSlash:
+    'URL base must not end in a trailing slash',
   atLeastOneAuth: 'At least one authentication method must be selected.',
   newPlexLogin: 'Enable New {mediaServerName} Sign-In',
   newPlexLoginTip:
@@ -44,6 +69,25 @@ const messages = defineMessages('components.Settings.SettingsUsers', {
     'Some users may not have a {applicationTitle} password set. Disabling {mediaServerName} sign-in could lock them out. Affected users will need to set a password from their profile or via a password reset link.',
 });
 
+const defaultLoginServer: LoginServerSettings = {
+  enabled: false,
+  ip: '',
+  port: 8096,
+  useSsl: false,
+  urlBase: '',
+  externalHostname: '',
+  forgotPasswordUrl: '',
+};
+
+const loginServerTypes: {
+  key: keyof LoginServersSettings;
+  name: string;
+  type: MediaServerType;
+}[] = [
+  { key: 'jellyfin', name: 'Jellyfin', type: MediaServerType.JELLYFIN },
+  { key: 'emby', name: 'Emby', type: MediaServerType.EMBY },
+];
+
 const SettingsUsers = () => {
   const { addToast } = useToasts();
   const intl = useIntl();
@@ -54,18 +98,94 @@ const SettingsUsers = () => {
   } = useSWR<MainSettings>('/api/v1/settings/main');
   const settings = useSettings();
 
+  // Jellyfin/Emby servers that can be configured for sign-in in addition to
+  // the primary media server
+  const additionalLoginServerTypes = loginServerTypes.filter(
+    (server) => server.type !== settings.currentSettings.mediaServerType
+  );
+
+  const loginServerSchema = yup.object().shape({
+    enabled: yup.boolean(),
+    ip: yup
+      .string()
+      .nullable()
+      .when('enabled', {
+        is: true,
+        then: (schema) =>
+          schema.required(
+            intl.formatMessage(messages.validationLoginServerHostnameRequired)
+          ),
+      }),
+    port: yup
+      .number()
+      .typeError(intl.formatMessage(messages.validationLoginServerPortRequired))
+      .nullable()
+      .when('enabled', {
+        is: true,
+        then: (schema) =>
+          schema.required(
+            intl.formatMessage(messages.validationLoginServerPortRequired)
+          ),
+      }),
+    urlBase: yup
+      .string()
+      .test(
+        'leading-slash',
+        intl.formatMessage(messages.validationLoginServerUrlBaseLeadingSlash),
+        (value) => !value || value.startsWith('/')
+      )
+      .test(
+        'trailing-slash',
+        intl.formatMessage(messages.validationLoginServerUrlBaseTrailingSlash),
+        (value) => !value || !value.endsWith('/')
+      ),
+    externalHostname: yup
+      .string()
+      .nullable()
+      .test(
+        'valid-url',
+        intl.formatMessage(messages.validationLoginServerUrl),
+        isValidURL
+      )
+      .test(
+        'no-trailing-slash',
+        intl.formatMessage(messages.validationLoginServerUrlTrailingSlash),
+        (value) => !value || !value.endsWith('/')
+      ),
+    forgotPasswordUrl: yup
+      .string()
+      .nullable()
+      .test(
+        'valid-url',
+        intl.formatMessage(messages.validationLoginServerUrl),
+        isValidURL
+      )
+      .test(
+        'no-trailing-slash',
+        intl.formatMessage(messages.validationLoginServerUrlTrailingSlash),
+        (value) => !value || !value.endsWith('/')
+      ),
+  });
+
   const schema = yup
     .object()
     .shape({
       localLogin: yup.boolean(),
       mediaServerLogin: yup.boolean(),
+      loginServers: yup.object().shape({
+        jellyfin: loginServerSchema,
+        emby: loginServerSchema,
+      }),
     })
     .test({
       name: 'atLeastOneAuth',
       test: function (values) {
-        const isValid = (
-          ['localLogin', 'mediaServerLogin'] as (keyof typeof values)[]
-        ).some((field) => !!values[field]);
+        const isValid =
+          !!values.localLogin ||
+          !!values.mediaServerLogin ||
+          additionalLoginServerTypes.some(
+            (server) => !!values.loginServers?.[server.key]?.enabled
+          );
 
         if (isValid) return true;
         return this.createError({
@@ -109,6 +229,13 @@ const SettingsUsers = () => {
           initialValues={{
             localLogin: data?.localLogin,
             mediaServerLogin: data?.mediaServerLogin,
+            loginServers: {
+              jellyfin: {
+                ...defaultLoginServer,
+                ...data?.loginServers?.jellyfin,
+              },
+              emby: { ...defaultLoginServer, ...data?.loginServers?.emby },
+            },
             newPlexLogin: data?.newPlexLogin,
             movieQuotaLimit: data?.defaultQuotas.movie.quotaLimit ?? 0,
             movieQuotaDays: data?.defaultQuotas.movie.quotaDays ?? 7,
@@ -123,6 +250,15 @@ const SettingsUsers = () => {
               await axios.post('/api/v1/settings/main', {
                 localLogin: values.localLogin,
                 mediaServerLogin: values.mediaServerLogin,
+                loginServers: Object.fromEntries(
+                  loginServerTypes.map(({ key }) => [
+                    key,
+                    {
+                      ...values.loginServers[key],
+                      port: Number(values.loginServers[key].port),
+                    },
+                  ])
+                ),
                 newPlexLogin: values.newPlexLogin,
                 defaultQuotas: {
                   movie: {
@@ -142,17 +278,43 @@ const SettingsUsers = () => {
                 autoDismiss: true,
                 appearance: 'success',
               });
-            } catch {
-              addToast(intl.formatMessage(messages.toastSettingsFailure), {
-                autoDismiss: true,
-                appearance: 'error',
-              });
+            } catch (e) {
+              const isConnectionError =
+                e?.response?.data?.message === ApiErrorCode.InvalidUrl ||
+                e?.response?.data?.message === ApiErrorCode.ConnectionError;
+
+              addToast(
+                intl.formatMessage(
+                  isConnectionError
+                    ? messages.toastLoginServerConnectionFailure
+                    : messages.toastSettingsFailure
+                ),
+                {
+                  autoDismiss: true,
+                  appearance: 'error',
+                }
+              );
             } finally {
               revalidate();
             }
           }}
         >
-          {({ isSubmitting, isValid, values, errors, setFieldValue }) => {
+          {({
+            isSubmitting,
+            isValid,
+            values,
+            errors,
+            touched,
+            setFieldValue,
+          }) => {
+            const loginServerError = (path: string) => {
+              const fieldError = getIn(errors, path);
+
+              return getIn(touched, path) && typeof fieldError === 'string' ? (
+                <div className="error">{fieldError}</div>
+              ) : null;
+            };
+
             return (
               <Form className="section">
                 <div
@@ -218,6 +380,155 @@ const SettingsUsers = () => {
                           />
                         </div>
                       )}
+                      {additionalLoginServerTypes.map(({ key, name }) => {
+                        const server = values.loginServers[key];
+                        const fieldName = (field: keyof LoginServerSettings) =>
+                          `loginServers.${key}.${field}`;
+
+                        return (
+                          <div key={key} className="mt-4">
+                            <LabeledCheckbox
+                              id={fieldName('enabled')}
+                              label={intl.formatMessage(
+                                messages.mediaServerLogin,
+                                { mediaServerName: name }
+                              )}
+                              description={intl.formatMessage(
+                                messages.loginServerTip,
+                                { mediaServerName: name }
+                              )}
+                              onChange={() =>
+                                setFieldValue(
+                                  fieldName('enabled'),
+                                  !server.enabled
+                                )
+                              }
+                            />
+                            {server.enabled && (
+                              <div className="mt-4 space-y-4 pl-10">
+                                <div>
+                                  <label htmlFor={fieldName('ip')}>
+                                    {intl.formatMessage(
+                                      messages.loginServerHostname
+                                    )}
+                                    <span className="label-required">*</span>
+                                  </label>
+                                  <div className="form-input-field">
+                                    <span className="inline-flex cursor-default items-center rounded-l-md border border-r-0 border-gray-500 bg-gray-800 px-3 text-gray-100 sm:text-sm">
+                                      {server.useSsl ? 'https://' : 'http://'}
+                                    </span>
+                                    <Field
+                                      type="text"
+                                      inputMode="url"
+                                      id={fieldName('ip')}
+                                      name={fieldName('ip')}
+                                      className="rounded-r-only"
+                                    />
+                                  </div>
+                                  {loginServerError(fieldName('ip'))}
+                                </div>
+                                <div>
+                                  <label htmlFor={fieldName('port')}>
+                                    {intl.formatMessage(
+                                      messages.loginServerPort
+                                    )}
+                                    <span className="label-required">*</span>
+                                  </label>
+                                  <Field
+                                    type="text"
+                                    inputMode="numeric"
+                                    id={fieldName('port')}
+                                    name={fieldName('port')}
+                                    className="short"
+                                  />
+                                  {loginServerError(fieldName('port'))}
+                                </div>
+                                <div className="flex items-center">
+                                  <Field
+                                    type="checkbox"
+                                    id={fieldName('useSsl')}
+                                    name={fieldName('useSsl')}
+                                    onChange={() => {
+                                      setFieldValue(
+                                        fieldName('useSsl'),
+                                        !server.useSsl
+                                      );
+                                      setFieldValue(
+                                        fieldName('port'),
+                                        server.useSsl ? 8096 : 443
+                                      );
+                                    }}
+                                  />
+                                  <label
+                                    htmlFor={fieldName('useSsl')}
+                                    className="mb-0 ml-3"
+                                  >
+                                    {intl.formatMessage(
+                                      messages.loginServerUseSsl
+                                    )}
+                                  </label>
+                                </div>
+                                <div>
+                                  <label htmlFor={fieldName('urlBase')}>
+                                    {intl.formatMessage(
+                                      messages.loginServerUrlBase
+                                    )}
+                                  </label>
+                                  <div className="form-input-field">
+                                    <Field
+                                      type="text"
+                                      inputMode="url"
+                                      id={fieldName('urlBase')}
+                                      name={fieldName('urlBase')}
+                                    />
+                                  </div>
+                                  {loginServerError(fieldName('urlBase'))}
+                                </div>
+                                <div>
+                                  <label
+                                    htmlFor={fieldName('externalHostname')}
+                                  >
+                                    {intl.formatMessage(
+                                      messages.loginServerExternalUrl
+                                    )}
+                                  </label>
+                                  <div className="form-input-field">
+                                    <Field
+                                      type="text"
+                                      inputMode="url"
+                                      id={fieldName('externalHostname')}
+                                      name={fieldName('externalHostname')}
+                                    />
+                                  </div>
+                                  {loginServerError(
+                                    fieldName('externalHostname')
+                                  )}
+                                </div>
+                                <div>
+                                  <label
+                                    htmlFor={fieldName('forgotPasswordUrl')}
+                                  >
+                                    {intl.formatMessage(
+                                      messages.loginServerForgotPasswordUrl
+                                    )}
+                                  </label>
+                                  <div className="form-input-field">
+                                    <Field
+                                      type="text"
+                                      inputMode="url"
+                                      id={fieldName('forgotPasswordUrl')}
+                                      name={fieldName('forgotPasswordUrl')}
+                                    />
+                                  </div>
+                                  {loginServerError(
+                                    fieldName('forgotPasswordUrl')
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>

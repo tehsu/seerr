@@ -1,3 +1,4 @@
+import type { PublicLoginServersSettings } from '@server/lib/settings';
 import type { DnsEntries, DnsStats } from 'dns-caching';
 import type { PaginatedResponse } from './common';
 
@@ -31,8 +32,10 @@ export interface PublicSettingsResponse {
   applicationUrl: string;
   hideAvailable: boolean;
   hideBlocklisted: boolean;
+  hideRequested: boolean;
   localLogin: boolean;
   mediaServerLogin: boolean;
+  loginServers: PublicLoginServersSettings;
   movie4kEnabled: boolean;
   series4kEnabled: boolean;
   discoverRegion: string;
