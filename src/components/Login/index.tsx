@@ -1,6 +1,5 @@
 import EmbyLogo from '@app/assets/services/emby-icon-only.svg';
 import JellyfinLogo from '@app/assets/services/jellyfin-icon.svg';
-import PlexLogo from '@app/assets/services/plex.svg';
 import Button from '@app/components/Common/Button';
 import ImageFader from '@app/components/Common/ImageFader';
 import PageTitle from '@app/components/Common/PageTitle';
@@ -31,6 +30,25 @@ const messages = defineMessages('components.Login', {
   orsigninwith: 'Or sign in with',
 });
 
+/** Sign-in methods that are presented as a form (Plex uses an OAuth button). */
+type LoginFormMethod = 'local' | 'jellyfin' | 'emby';
+
+const mediaServerForms: Record<
+  Exclude<LoginFormMethod, 'local'>,
+  {
+    serverType: MediaServerType;
+    name: string;
+    Logo: React.FC<React.SVGProps<SVGSVGElement>>;
+  }
+> = {
+  jellyfin: {
+    serverType: MediaServerType.JELLYFIN,
+    name: 'Jellyfin',
+    Logo: JellyfinLogo,
+  },
+  emby: { serverType: MediaServerType.EMBY, name: 'Emby', Logo: EmbyLogo },
+};
+
 const Login = () => {
   const intl = useIntl();
   const router = useRouter();
@@ -40,8 +58,8 @@ const Login = () => {
   const [error, setError] = useState('');
   const [isProcessing, setProcessing] = useState(false);
   const [authToken, setAuthToken] = useState<string | undefined>(undefined);
-  const [mediaServerLogin, setMediaServerLogin] = useState(
-    settings.currentSettings.mediaServerLogin
+  const [selectedForm, setSelectedForm] = useState<LoginFormMethod | undefined>(
+    undefined
   );
 
   // Effect that is triggered when the `authToken` comes back from the Plex OAuth
@@ -81,51 +99,84 @@ const Login = () => {
     revalidateOnFocus: false,
   });
 
-  const mediaServerName =
-    settings.currentSettings.mediaServerType === MediaServerType.PLEX
-      ? 'Plex'
-      : settings.currentSettings.mediaServerType === MediaServerType.JELLYFIN
-        ? 'Jellyfin'
-        : settings.currentSettings.mediaServerType === MediaServerType.EMBY
-          ? 'Emby'
-          : undefined;
+  const {
+    mediaServerType: primaryServerType,
+    mediaServerLogin: primaryServerLoginEnabled,
+    localLogin: localLoginEnabled,
+    loginServers,
+  } = settings.currentSettings;
 
-  const MediaServerLogo =
-    settings.currentSettings.mediaServerType === MediaServerType.PLEX
-      ? PlexLogo
-      : settings.currentSettings.mediaServerType === MediaServerType.JELLYFIN
-        ? JellyfinLogo
-        : settings.currentSettings.mediaServerType === MediaServerType.EMBY
-          ? EmbyLogo
-          : undefined;
+  // Form-based sign-in methods, in the order they are offered: the primary
+  // media server first, then the local account, then any additional
+  // Jellyfin/Emby servers configured for sign-in alongside the primary one.
+  const formMethods: LoginFormMethod[] = [];
+  if (
+    primaryServerLoginEnabled &&
+    primaryServerType === MediaServerType.JELLYFIN
+  ) {
+    formMethods.push('jellyfin');
+  }
+  if (primaryServerLoginEnabled && primaryServerType === MediaServerType.EMBY) {
+    formMethods.push('emby');
+  }
+  if (localLoginEnabled) {
+    formMethods.push('local');
+  }
+  if (
+    loginServers?.jellyfin.enabled &&
+    primaryServerType !== MediaServerType.JELLYFIN
+  ) {
+    formMethods.push('jellyfin');
+  }
+  if (
+    loginServers?.emby.enabled &&
+    primaryServerType !== MediaServerType.EMBY
+  ) {
+    formMethods.push('emby');
+  }
 
-  const isJellyfin =
-    settings.currentSettings.mediaServerType === MediaServerType.JELLYFIN ||
-    settings.currentSettings.mediaServerType === MediaServerType.EMBY;
-  const mediaServerLoginRef = useRef<HTMLDivElement>(null);
+  const plexLoginEnabled =
+    primaryServerLoginEnabled && primaryServerType === MediaServerType.PLEX;
+
+  const activeForm =
+    selectedForm && formMethods.includes(selectedForm)
+      ? selectedForm
+      : formMethods[0];
+  const loginFormVisible = !!activeForm;
+
   const localLoginRef = useRef<HTMLDivElement>(null);
-  const loginRef = mediaServerLogin ? mediaServerLoginRef : localLoginRef;
+  const jellyfinLoginRef = useRef<HTMLDivElement>(null);
+  const embyLoginRef = useRef<HTMLDivElement>(null);
+  const loginRefs = {
+    local: localLoginRef,
+    jellyfin: jellyfinLoginRef,
+    emby: embyLoginRef,
+  };
+  const loginRef = activeForm ? loginRefs[activeForm] : localLoginRef;
 
-  const loginFormVisible =
-    (isJellyfin && settings.currentSettings.mediaServerLogin) ||
-    settings.currentSettings.localLogin;
-  const additionalLoginOptions = [
-    settings.currentSettings.mediaServerLogin &&
-      (settings.currentSettings.mediaServerType === MediaServerType.PLEX ? (
-        <PlexLoginButton
-          key="plex"
-          isProcessing={isProcessing}
-          onAuthToken={(authToken) => setAuthToken(authToken)}
-          large={!isJellyfin && !settings.currentSettings.localLogin}
-        />
-      ) : (
-        settings.currentSettings.localLogin &&
-        (mediaServerLogin ? (
+  const additionalLoginOptions: JSX.Element[] = [];
+
+  if (plexLoginEnabled) {
+    additionalLoginOptions.push(
+      <PlexLoginButton
+        key="plex"
+        isProcessing={isProcessing}
+        onAuthToken={(authToken) => setAuthToken(authToken)}
+        large={!loginFormVisible}
+      />
+    );
+  }
+
+  formMethods
+    .filter((method) => method !== activeForm)
+    .forEach((method) => {
+      if (method === 'local') {
+        additionalLoginOptions.push(
           <Button
             key="seerr"
             data-testid="seerr-login-button"
             className="flex-1 bg-transparent"
-            onClick={() => setMediaServerLogin(false)}
+            onClick={() => setSelectedForm('local')}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -135,19 +186,28 @@ const Login = () => {
             />
             <span>{settings.currentSettings.applicationTitle}</span>
           </Button>
-        ) : (
-          <Button
-            key="mediaserver"
-            data-testid="mediaserver-login-button"
-            className="flex-1 bg-transparent"
-            onClick={() => setMediaServerLogin(true)}
-          >
-            <MediaServerLogo />
-            <span>{mediaServerName}</span>
-          </Button>
-        ))
-      )),
-  ].filter((o): o is JSX.Element => !!o);
+        );
+        return;
+      }
+
+      const { serverType, name, Logo } = mediaServerForms[method];
+
+      additionalLoginOptions.push(
+        <Button
+          key={method}
+          data-testid={
+            serverType === primaryServerType
+              ? 'mediaserver-login-button'
+              : `${method}-login-button`
+          }
+          className="flex-1 bg-transparent"
+          onClick={() => setSelectedForm(method)}
+        >
+          <Logo />
+          <span>{name}</span>
+        </Button>
+      );
+    });
 
   return (
     <div className="relative flex min-h-screen flex-col bg-gray-900 py-14">
@@ -199,7 +259,7 @@ const Login = () => {
             <div className="px-10 py-8">
               <SwitchTransition mode="out-in">
                 <CSSTransition
-                  key={mediaServerLogin ? 'ms' : 'local'}
+                  key={activeForm ?? 'none'}
                   nodeRef={loginRef}
                   timeout={{ enter: 300, exit: 150 }}
                   onEntered={() => {
@@ -215,16 +275,14 @@ const Login = () => {
                   }}
                 >
                   <div ref={loginRef} className="button-container">
-                    {isJellyfin &&
-                    (mediaServerLogin ||
-                      !settings.currentSettings.localLogin) ? (
-                      <JellyfinLogin
-                        serverType={settings.currentSettings.mediaServerType}
-                        revalidate={revalidate}
-                      />
+                    {activeForm === 'local' ? (
+                      <LocalLogin revalidate={revalidate} />
                     ) : (
-                      settings.currentSettings.localLogin && (
-                        <LocalLogin revalidate={revalidate} />
+                      activeForm && (
+                        <JellyfinLogin
+                          serverType={mediaServerForms[activeForm].serverType}
+                          revalidate={revalidate}
+                        />
                       )
                     )}
                   </div>

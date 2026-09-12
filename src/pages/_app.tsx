@@ -249,6 +249,10 @@ CoreApp.getInitialProps = async (initialProps) => {
     series4kEnabled: false,
     localLogin: true,
     mediaServerLogin: true,
+    loginServers: {
+      jellyfin: { enabled: false },
+      emby: { enabled: false },
+    },
     discoverRegion: '',
     streamingRegion: '',
     originalLanguage: '',

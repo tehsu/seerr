@@ -144,21 +144,26 @@ class JellyfinAPI extends ExternalAPI {
   private userId?: string;
   private mediaServerType: MediaServerType;
 
+  /**
+   * @param mediaServerType Whether the server is a Jellyfin or an Emby server.
+   * Defaults to the primary media server type; pass it explicitly when
+   * talking to an additional login server.
+   */
   constructor(
     jellyfinHost: string,
     authToken?: string | null,
-    deviceId?: string | null
+    deviceId?: string | null,
+    mediaServerType?: MediaServerType
   ) {
     const settings = getSettings();
+    const serverType = mediaServerType ?? settings.main.mediaServerType;
     const safeDeviceId =
       deviceId && deviceId.length > 0
         ? deviceId
         : Buffer.from('BOT_seerr').toString('base64');
 
     const version =
-      settings.main.mediaServerType === MediaServerType.EMBY
-        ? '1.0.0'
-        : getAppVersion();
+      serverType === MediaServerType.EMBY ? '1.0.0' : getAppVersion();
 
     let authHeaderVal = `MediaBrowser Client="Seerr", Device="Seerr", DeviceId="${safeDeviceId}", Version="${version}"`;
     if (authToken) {
@@ -177,7 +182,7 @@ class JellyfinAPI extends ExternalAPI {
       }
     );
 
-    this.mediaServerType = settings.main.mediaServerType;
+    this.mediaServerType = serverType;
   }
 
   public async login(

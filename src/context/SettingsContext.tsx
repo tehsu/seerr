@@ -17,6 +17,10 @@ const defaultSettings = {
   hideRequested: false,
   localLogin: true,
   mediaServerLogin: true,
+  loginServers: {
+    jellyfin: { enabled: false },
+    emby: { enabled: false },
+  },
   movie4kEnabled: false,
   series4kEnabled: false,
   discoverRegion: '',

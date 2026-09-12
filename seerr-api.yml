@@ -241,6 +241,17 @@ components:
         localLogin:
           type: boolean
           example: true
+        mediaServerLogin:
+          type: boolean
+          example: true
+        loginServers:
+          type: object
+          description: Additional Jellyfin/Emby servers users can sign in with, alongside the primary media server. They are only used for authentication.
+          properties:
+            jellyfin:
+              $ref: '#/components/schemas/LoginServerSettings'
+            emby:
+              $ref: '#/components/schemas/LoginServerSettings'
         mediaServerType:
           type: number
           example: 1
@@ -256,6 +267,30 @@ components:
         versionCheck:
           type: boolean
           example: false
+    LoginServerSettings:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          example: false
+        ip:
+          type: string
+          example: jellyfin.example.com
+        port:
+          type: number
+          example: 8096
+        useSsl:
+          type: boolean
+          example: false
+        urlBase:
+          type: string
+          example: ''
+        externalHostname:
+          type: string
+          example: https://jellyfin.example.com
+        forgotPasswordUrl:
+          type: string
+          example: ''
     NetworkSettings:
       type: object
       properties:
@@ -4059,8 +4094,8 @@ paths:
                 - authToken
   /auth/jellyfin:
     post:
-      summary: Sign in using a Jellyfin username and password
-      description: Takes the user's username and password to log the user in. Generates a session cookie for use in further requests. If the user does not exist, and there are no other users, then a user will be created with full admin privileges. If a user logs in with access to the Jellyfin server, they will also have an account created, but without any permissions.
+      summary: Sign in using a Jellyfin or Emby username and password
+      description: Takes the user's username and password to log the user in. Generates a session cookie for use in further requests. If the user does not exist, and there are no other users, then a user will be created with full admin privileges. If a user logs in with access to the Jellyfin server, they will also have an account created, but without any permissions. Pass `serverType` to sign in with an additional Jellyfin (`2`) or Emby (`3`) server configured alongside the primary media server; when omitted, the primary media server is used.
       security: []
       tags:
         - auth
@@ -4088,13 +4123,15 @@ paths:
                   type: string
                 serverType:
                   type: number
+                  description: Media server type to sign in with (2 for Jellyfin, 3 for Emby). Required during initial setup and when signing in with an additional login server.
+                  example: 2
               required:
                 - username
                 - password
   /auth/jellyfin/quickconnect/initiate:
     post:
       summary: Initiate Jellyfin Quick Connect
-      description: Initiates a Quick Connect session and returns a code for the user to authorize on their Jellyfin server.
+      description: Initiates a Quick Connect session and returns a code for the user to authorize on their Jellyfin server. Quick Connect targets the primary media server when it is Jellyfin, or otherwise the additional Jellyfin login server if one is enabled.
       security: []
       tags:
         - auth

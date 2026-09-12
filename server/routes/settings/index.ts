@@ -4,6 +4,7 @@ import PlexAPI from '@server/api/plexapi';
 import PlexTvAPI from '@server/api/plextv';
 import TautulliAPI from '@server/api/tautulli';
 import { ApiErrorCode } from '@server/constants/error';
+import { MediaServerType } from '@server/constants/server';
 import { getRepository } from '@server/datasource';
 import Media from '@server/entity/Media';
 import { MediaRequest } from '@server/entity/MediaRequest';
@@ -21,7 +22,13 @@ import ImageProxy from '@server/lib/imageproxy';
 import { Permission } from '@server/lib/permissions';
 import { jellyfinFullScanner } from '@server/lib/scanners/jellyfin';
 import { plexFullScanner } from '@server/lib/scanners/plex';
-import type { JobId, Library, MainSettings } from '@server/lib/settings';
+import type {
+  JobId,
+  Library,
+  LoginServerSettings,
+  LoginServersSettings,
+  MainSettings,
+} from '@server/lib/settings';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
 import { isAuthenticated } from '@server/middleware/auth';
@@ -31,6 +38,12 @@ import { appDataPath } from '@server/utils/appDataVolume';
 import { getAppVersion } from '@server/utils/appVersion';
 import { dnsCache } from '@server/utils/dnsCache';
 import { getHostname } from '@server/utils/getHostname';
+import type { LoginServerType } from '@server/utils/loginServers';
+import {
+  getLoginServerHostname,
+  getLoginServerKey,
+  hasLoginServerConnectionChanged,
+} from '@server/utils/loginServers';
 import type { DnsEntries, DnsStats } from 'dns-caching';
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
@@ -79,8 +92,73 @@ settingsRoutes.get('/main', (req, res, next) => {
   res.status(200).json(filteredMainSettings(req.user, settings.main));
 });
 
-settingsRoutes.post('/main', async (req, res) => {
+/**
+ * Makes sure every additional login server that is being enabled (or whose
+ * connection details are changing) is reachable, so that users are not
+ * offered a sign-in option that cannot work.
+ */
+const verifyLoginServers = async (
+  current: MainSettings,
+  incoming: Partial<LoginServersSettings>
+): Promise<void> => {
+  const types: LoginServerType[] = [
+    MediaServerType.JELLYFIN,
+    MediaServerType.EMBY,
+  ];
+
+  for (const type of types) {
+    const key = getLoginServerKey(type);
+    const currentServer = current.loginServers[key];
+    const incomingServer = incoming[key];
+
+    if (!incomingServer) {
+      continue;
+    }
+
+    const merged: LoginServerSettings = { ...currentServer, ...incomingServer };
+
+    if (
+      !merged.enabled ||
+      type === current.mediaServerType ||
+      !hasLoginServerConnectionChanged(currentServer, merged)
+    ) {
+      continue;
+    }
+
+    if (!merged.ip) {
+      throw new ApiError(400, ApiErrorCode.InvalidUrl);
+    }
+
+    const client = new JellyfinAPI(
+      getLoginServerHostname(merged),
+      undefined,
+      undefined,
+      type
+    );
+
+    await client.getServerName();
+  }
+};
+
+settingsRoutes.post('/main', async (req, res, next) => {
   const settings = getSettings();
+
+  if (req.body?.loginServers) {
+    try {
+      await verifyLoginServers(settings.main, req.body.loginServers);
+    } catch (e) {
+      logger.error('Something went wrong testing login server connection', {
+        label: 'API',
+        status: e.statusCode,
+        errorMessage: e.errorCode ?? e.message,
+      });
+
+      return next({
+        status: e.statusCode ?? 500,
+        message: e.errorCode ?? ApiErrorCode.Unknown,
+      });
+    }
+  }
 
   settings.main = merge(settings.main, req.body);
   await settings.save();
