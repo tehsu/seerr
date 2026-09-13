@@ -1,5 +1,6 @@
 import SettingsLayout from '@app/components/Settings/SettingsLayout';
 import SettingsPlex from '@app/components/Settings/SettingsPlex';
+import SettingsPrimaryServer from '@app/components/Settings/SettingsPrimaryServer';
 import useRouteGuard from '@app/hooks/useRouteGuard';
 import { Permission } from '@app/hooks/useUser';
 import type { NextPage } from 'next';
@@ -9,6 +10,7 @@ const PlexSettingsPage: NextPage = () => {
   return (
     <SettingsLayout>
       <SettingsPlex />
+      <SettingsPrimaryServer />
     </SettingsLayout>
   );
 };
