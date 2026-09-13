@@ -239,3 +239,27 @@ Seerr will perform a full scan of your Plex libraries once every 24 hours (recen
 </TabItem>
 
 </Tabs>
+
+## Primary Media Server
+
+Your primary media server is the one Seerr scans libraries from and checks media availability on. It is picked during setup, but you can point Seerr at a different one later from the **Primary Media Server** section at the bottom of this settings page.
+
+:::info
+Only the owner account (the first administrator, created during setup) can change the media server, because Seerr connects to the media server with their account.
+:::
+
+Select the server you would like to switch to, then:
+
+- **Jellyfin or Emby**: enter the hostname, port and URL base of the server, along with the credentials of an administrator account on it. Seerr verifies the connection, creates an API key, and links that account to your Seerr account so that you can keep signing in. If the server is already configured as an [additional sign-in server](/using-seerr/settings/users#enable-jellyfinemby-sign-in-additional-servers), its connection details are filled in for you, and it is turned off as an additional sign-in server once it becomes your primary media server.
+- **Plex**: sign in with the Plex account that owns the server you would like to use. Select the server itself in the Plex settings afterwards. If that account still owns the Plex server that was previously configured, its connection details and libraries are kept.
+
+When the media server you are replacing is a Jellyfin or Emby server, you can keep it available as an additional sign-in server, so that its users do not lose access to Seerr.
+
+:::warning
+Changing your media server affects existing users and media:
+
+- Users of your previous media server can no longer sign in with it, unless they have a password set for local sign-in or you kept that server for sign-in.
+- Libraries have to be selected again, and a manual library scan is recommended once you have.
+- The media identifiers of the previous server are dropped, so links to it are removed and media availability is rebuilt from the libraries of your new server.
+
+:::

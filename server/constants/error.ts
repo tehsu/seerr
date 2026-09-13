@@ -5,6 +5,8 @@ export enum ApiErrorCode {
   InvalidEmail = 'INVALID_EMAIL',
   NotAdmin = 'NOT_ADMIN',
   NoAdminUser = 'NO_ADMIN_USER',
+  NoServersFound = 'NO_SERVERS_FOUND',
+  AccountAlreadyLinked = 'ACCOUNT_ALREADY_LINKED',
   ConnectionError = 'CONNECTION_ERROR',
   SyncErrorGroupedFolders = 'SYNC_ERROR_GROUPED_FOLDERS',
   SyncErrorNoLibraries = 'SYNC_ERROR_NO_LIBRARIES',

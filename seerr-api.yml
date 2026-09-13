@@ -2314,6 +2314,67 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/NetworkSettings'
+  /settings/mediaserver:
+    post:
+      summary: Change the primary media server
+      description: |
+        Points Seerr at a different primary media server. The new server is
+        verified with the provided credentials before the change is applied,
+        and the account it is verified with becomes the media server account of
+        the owner. Only the owner (the first administrator) can call this.
+      tags:
+        - settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: number
+                  description: 1 = Plex, 2 = Jellyfin, 3 = Emby
+                  enum: [1, 2, 3]
+                  example: 2
+                hostname:
+                  type: string
+                  description: Hostname or IP address of the Jellyfin/Emby server
+                  example: jellyfin.example.com
+                port:
+                  type: number
+                  example: 8096
+                useSsl:
+                  type: boolean
+                  example: false
+                urlBase:
+                  type: string
+                  example: /jellyfin
+                username:
+                  type: string
+                  description: Username of an administrator on the Jellyfin/Emby server
+                  example: admin
+                password:
+                  type: string
+                  example: verysecretpassword
+                authToken:
+                  type: string
+                  description: plex.tv authentication token, when switching to Plex
+                  example: ndfoefno23nf2o3nfo2fn2o3
+                keepForSignIn:
+                  type: boolean
+                  description: >-
+                    Whether the Jellyfin/Emby server that is being replaced
+                    should be kept as an additional sign-in server
+                  example: true
+              required:
+                - type
+      responses:
+        '200':
+          description: 'The primary media server was changed'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MainSettings'
   /settings/main/regenerate:
     post:
       summary: Get main settings with newly-generated API key

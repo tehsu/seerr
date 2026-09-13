@@ -261,3 +261,23 @@ export const startJobs = (): void => {
 
   logger.info('Scheduled jobs loaded', { label: 'Jobs' });
 };
+
+/**
+ * Cancels every scheduled job and schedules them again.
+ *
+ * The media server jobs that are scheduled depend on the primary media server
+ * type, so they have to be rebuilt whenever it changes.
+ */
+export const restartJobs = (): void => {
+  scheduledJobs.forEach((scheduledJob) => {
+    if (scheduledJob.running?.()) {
+      scheduledJob.cancelFn?.();
+    }
+
+    scheduledJob.job.cancel();
+  });
+
+  scheduledJobs.length = 0;
+
+  startJobs();
+};
