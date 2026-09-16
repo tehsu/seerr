@@ -117,3 +117,57 @@ describe('RadarrAPI getMovieByTmdbId', () => {
     });
   });
 });
+
+describe('ServarrBase getQueue', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('walks every page so downloads past the first are not lost', async () => {
+    const radarr = buildRadarr();
+    const pages = [
+      { records: [{ id: 1 }, { id: 2 }], totalRecords: 3 },
+      { records: [{ id: 3 }], totalRecords: 3 },
+    ];
+    const requestedPages: unknown[] = [];
+    const get = mock.method(
+      getAxios(radarr),
+      'get',
+      async (_path: string, config?: { params?: { page?: number } }) => {
+        requestedPages.push(config?.params?.page);
+        return { data: pages.shift() };
+      }
+    );
+
+    const queue = await radarr.getQueue();
+
+    assert.deepEqual(
+      queue.map((item) => item.id),
+      [1, 2, 3]
+    );
+    assert.strictEqual(get.mock.callCount(), 2);
+    assert.deepEqual(requestedPages, [1, 2]);
+  });
+
+  it('stops once the queue reports no more records', async () => {
+    const radarr = buildRadarr();
+    const get = mock.method(getAxios(radarr), 'get', async () => ({
+      data: { records: [{ id: 1 }], totalRecords: 1 },
+    }));
+
+    const queue = await radarr.getQueue();
+
+    assert.strictEqual(queue.length, 1);
+    assert.strictEqual(get.mock.callCount(), 1);
+  });
+
+  it('stops on an empty page even when totalRecords keeps climbing', async () => {
+    const radarr = buildRadarr();
+    const get = mock.method(getAxios(radarr), 'get', async () => ({
+      data: { records: [], totalRecords: 500 },
+    }));
+
+    const queue = await radarr.getQueue();
+
+    assert.deepEqual(queue, []);
+    assert.strictEqual(get.mock.callCount(), 1);
+  });
+});

@@ -48,19 +48,33 @@ export interface QualityProfile {
   name: string;
 }
 
-interface QueueItem {
+export interface QueueStatusMessage {
+  title: string;
+  messages: string[];
+}
+
+export interface QueueItem {
   size: number;
   title: string;
   sizeleft: number;
   timeleft: string;
   estimatedCompletionTime: string;
+  added?: string;
   status: string;
   trackedDownloadStatus: string;
   trackedDownloadState: string;
+  statusMessages?: QueueStatusMessage[];
+  errorMessage?: string;
   downloadId: string;
   protocol: string;
   downloadClient: string;
   indexer: string;
+  quality?: {
+    quality?: {
+      id: number;
+      name: string;
+    };
+  };
   id: number;
 }
 
@@ -77,6 +91,12 @@ interface QueueResponse<QueueItemAppendT> {
   totalRecords: number;
   records: (QueueItem & QueueItemAppendT)[];
 }
+
+/** Big enough that one page is the whole queue in all but extreme cases. */
+const QUEUE_PAGE_SIZE = 200;
+
+/** Stops a queue that keeps reporting more records than it hands back. */
+const QUEUE_PAGE_LIMIT = 25;
 
 class ServarrBase<QueueItemAppendT> extends ExternalAPI {
   static buildUrl(settings: DVRSettings, path?: string): string {
@@ -161,25 +181,47 @@ class ServarrBase<QueueItemAppendT> extends ExternalAPI {
     }
   };
 
-  public getQueue = async (): Promise<(QueueItem & QueueItemAppendT)[]> => {
+  public async getQueue(): Promise<(QueueItem & QueueItemAppendT)[]> {
     try {
-      const response = await this.axios.get<QueueResponse<QueueItemAppendT>>(
-        `/queue`,
-        {
-          params: {
-            includeEpisode: true,
-          },
-        }
-      );
+      // Keyed by record id, since a queue that shifts between two page
+      // requests can otherwise hand back the same download twice.
+      const records = new Map<number, QueueItem & QueueItemAppendT>();
 
-      return response.data.records;
+      // The queue is paged and defaults to ten records, so every download past
+      // the first handful is invisible unless the later pages are asked for.
+      for (let page = 1; page <= QUEUE_PAGE_LIMIT; page++) {
+        const response = await this.axios.get<QueueResponse<QueueItemAppendT>>(
+          `/queue`,
+          {
+            params: {
+              includeEpisode: true,
+              page,
+              pageSize: QUEUE_PAGE_SIZE,
+            },
+          }
+        );
+
+        const pageRecords = response.data.records ?? [];
+        pageRecords.forEach((record) => records.set(record.id, record));
+
+        // An empty page is the guard against a totalRecords that never
+        // catches up, which would otherwise loop until the page limit.
+        if (
+          pageRecords.length === 0 ||
+          records.size >= (response.data.totalRecords ?? 0)
+        ) {
+          break;
+        }
+      }
+
+      return [...records.values()];
     } catch (e) {
       throw new Error(
         `[${this.apiName}] Failed to retrieve queue: ${e.message}`,
         { cause: e }
       );
     }
-  };
+  }
 
   public getTags = async (): Promise<Tag[]> => {
     try {
