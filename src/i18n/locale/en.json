@@ -500,6 +500,8 @@
   "components.PermissionEdit.usersDescription": "Grant permission to manage users. Users with this permission cannot modify users with or grant the Admin privilege.",
   "components.PermissionEdit.viewblocklistedItems": "View blocklisted media.",
   "components.PermissionEdit.viewblocklistedItemsDescription": "Grant permission to view blocklisted media.",
+  "components.PermissionEdit.viewdownloads": "View Downloads",
+  "components.PermissionEdit.viewdownloadsDescription": "Grant permission to view the progress, time left and status of active downloads. Release names and download details remain visible to administrators only.",
   "components.PermissionEdit.viewissues": "View Issues",
   "components.PermissionEdit.viewissuesDescription": "Grant permission to view media issues reported by other users.",
   "components.PermissionEdit.viewrecent": "View Recently Added",

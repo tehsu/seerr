@@ -85,6 +85,9 @@ export const messages = defineMessages('components.PermissionEdit', {
   viewblocklistedItems: 'View blocklisted media.',
   viewblocklistedItemsDescription:
     'Grant permission to view blocklisted media.',
+  viewdownloads: 'View Downloads',
+  viewdownloadsDescription:
+    'Grant permission to view the progress, time left and status of active downloads. Release names and download details remain visible to administrators only.',
 });
 
 interface PermissionEditProps {
@@ -338,6 +341,12 @@ export const PermissionEdit = ({
           permission: Permission.VIEW_ISSUES,
         },
       ],
+    },
+    {
+      id: 'viewdownloads',
+      name: intl.formatMessage(messages.viewdownloads),
+      description: intl.formatMessage(messages.viewdownloadsDescription),
+      permission: Permission.VIEW_DOWNLOADS,
     },
     {
       id: 'manageblocklist',
