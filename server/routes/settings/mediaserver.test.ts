@@ -369,7 +369,7 @@ describe('POST /settings/mediaserver', () => {
   it('returns 422 when the media server account belongs to another user', async () => {
     const userRepository = getRepository(User);
     const otherUser = await userRepository.findOneOrFail({
-      where: { email: 'friend@seerr.dev' },
+      where: { email: 'demo@seerr.dev' },
     });
     otherUser.jellyfinUserId = 'jf-admin-001';
     await userRepository.save(otherUser);
@@ -486,12 +486,12 @@ describe('POST /settings/mediaserver', () => {
   it('returns 403 for an administrator that is not the owner', async () => {
     const userRepository = getRepository(User);
     const otherAdmin = await userRepository.findOneOrFail({
-      where: { email: 'friend@seerr.dev' },
+      where: { email: 'demo@seerr.dev' },
     });
     otherAdmin.permissions = Permission.ADMIN;
     await userRepository.save(otherAdmin);
 
-    const { agent } = await loginAs('friend@seerr.dev', 'test1234');
+    const { agent } = await loginAs('demo@seerr.dev', 'test1234');
 
     const res = await agent.post('/settings/mediaserver').send({
       type: MediaServerType.JELLYFIN,

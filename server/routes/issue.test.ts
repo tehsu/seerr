@@ -17,14 +17,20 @@ import * as mediaReleaseSearch from '@server/lib/mediaReleaseSearch';
 import { Permission } from '@server/lib/permissions';
 import { getSettings } from '@server/lib/settings';
 import { checkUser } from '@server/middleware/auth';
+import { IssueCommentSubscriber } from '@server/subscriber/IssueCommentSubscriber';
 import { IssueSubscriber } from '@server/subscriber/IssueSubscriber';
 import { setupTestDb } from '@server/test/db';
+import {
+  assertNoCredentials,
+  seedUserSettings,
+} from '@server/test/userSettings';
 import type { Express } from 'express';
 import express from 'express';
 import session from 'express-session';
 import request from 'supertest';
 import authRoutes from './auth';
 import issueRoutes from './issue';
+import issueCommentRoutes from './issueComment';
 
 const sendIssueNotificationMock = mock.method(
   IssueSubscriber.prototype as unknown as {
@@ -65,6 +71,13 @@ const searchMediaReleaseMock = mock.method(
     target?: mediaReleaseSearch.ReleaseSearchTarget
   ) => searchMediaReleaseImpl(media, is4k, target)
 ).mock;
+mock.method(
+  IssueCommentSubscriber.prototype as unknown as {
+    sendIssueCommentNotification: (...args: unknown[]) => Promise<void>;
+  },
+  'sendIssueCommentNotification',
+  async () => undefined
+);
 
 let app: Express;
 
@@ -81,6 +94,7 @@ function createApp() {
   app.use(checkUser);
   app.use('/auth', authRoutes);
   app.use('/issue', issueRoutes);
+  app.use('/issueComment', issueCommentRoutes);
   app.use(
     (
       err: { status?: number; message?: string },
@@ -141,7 +155,7 @@ async function seedMedia(fields: Partial<Media> = {}) {
 
 async function seedIssue(media: Media, fields: Partial<Issue> = {}) {
   const createdBy = await getRepository(User).findOneOrFail({
-    where: { email: 'friend@seerr.dev' },
+    where: { email: 'demo@seerr.dev' },
   });
 
   return getRepository(Issue).save(
@@ -157,7 +171,7 @@ async function seedIssue(media: Media, fields: Partial<Issue> = {}) {
 
 async function seedRequest(media: Media, is4k = false) {
   const requestedBy = await getRepository(User).findOneOrFail({
-    where: { email: 'friend@seerr.dev' },
+    where: { email: 'demo@seerr.dev' },
   });
 
   return getRepository(MediaRequest).save(
@@ -178,7 +192,7 @@ describe('POST /issue', () => {
     const userRepo = getRepository(User);
     const media = await seedMedia();
     const friend = await userRepo.findOneOrFail({
-      where: { email: 'friend@seerr.dev' },
+      where: { email: 'demo@seerr.dev' },
     });
 
     const agent = await loginAs('admin@seerr.dev', 'test1234');
@@ -192,8 +206,8 @@ describe('POST /issue', () => {
     });
 
     assert.strictEqual(res.status, 201);
-    assert.strictEqual(res.body.createdBy.email, 'friend@seerr.dev');
-    assert.strictEqual(res.body.comments[0].user.email, 'friend@seerr.dev');
+    assert.strictEqual(res.body.createdBy.email, 'demo@seerr.dev');
+    assert.strictEqual(res.body.comments[0].user.email, 'demo@seerr.dev');
 
     const persisted = await issueRepo.findOneOrFail({
       where: { id: res.body.id },
@@ -222,13 +236,13 @@ describe('POST /issue', () => {
     const userRepo = getRepository(User);
     const media = await seedMedia();
     const friend = await userRepo.findOneOrFail({
-      where: { email: 'friend@seerr.dev' },
+      where: { email: 'demo@seerr.dev' },
     });
 
     friend.permissions = Permission.CREATE_ISSUES;
     await userRepo.save(friend);
 
-    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const agent = await loginAs('demo@seerr.dev', 'test1234');
     const res = await agent.post('/issue').send({
       issueType: IssueType.SUBTITLES,
       message: 'Subtitles are missing.',
@@ -237,15 +251,15 @@ describe('POST /issue', () => {
     });
 
     assert.strictEqual(res.status, 201);
-    assert.strictEqual(res.body.createdBy.email, 'friend@seerr.dev');
-    assert.strictEqual(res.body.comments[0].user.email, 'friend@seerr.dev');
+    assert.strictEqual(res.body.createdBy.email, 'demo@seerr.dev');
+    assert.strictEqual(res.body.comments[0].user.email, 'demo@seerr.dev');
   });
 
   it('prevents non-managers from supplying another userId', async () => {
     const userRepo = getRepository(User);
     const media = await seedMedia();
     const friend = await userRepo.findOneOrFail({
-      where: { email: 'friend@seerr.dev' },
+      where: { email: 'demo@seerr.dev' },
     });
     const admin = await userRepo.findOneOrFail({
       where: { email: 'admin@seerr.dev' },
@@ -254,7 +268,7 @@ describe('POST /issue', () => {
     friend.permissions = Permission.CREATE_ISSUES;
     await userRepo.save(friend);
 
-    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const agent = await loginAs('demo@seerr.dev', 'test1234');
     const res = await agent.post('/issue').send({
       issueType: IssueType.OTHER,
       message: 'Something else is wrong.',
@@ -288,13 +302,13 @@ describe('POST /issue', () => {
     const userRepo = getRepository(User);
     const media = await seedMedia();
     const friend = await userRepo.findOneOrFail({
-      where: { email: 'friend@seerr.dev' },
+      where: { email: 'demo@seerr.dev' },
     });
 
     friend.permissions = Permission.CREATE_ISSUES;
     await userRepo.save(friend);
 
-    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const agent = await loginAs('demo@seerr.dev', 'test1234');
     const res = await agent.post('/issue').send({
       issueType: IssueType.VIDEO,
       message: 'Wrong movie entirely, please remove it.',
@@ -336,13 +350,13 @@ describe('POST /issue/:issueId/media/search', () => {
     const media = await seedMedia({ serviceId: 0, externalServiceId: 4 });
     const issue = await seedIssue(media);
     const friend = await userRepo.findOneOrFail({
-      where: { email: 'friend@seerr.dev' },
+      where: { email: 'demo@seerr.dev' },
     });
 
     friend.permissions = Permission.CREATE_ISSUES;
     await userRepo.save(friend);
 
-    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const agent = await loginAs('demo@seerr.dev', 'test1234');
     const res = await agent.post(`/issue/${issue.id}/media/search`);
 
     assert.strictEqual(res.status, 204);
@@ -357,13 +371,13 @@ describe('POST /issue/:issueId/media/search', () => {
     });
     const issue = await seedIssue(media, { createdBy: admin });
     const friend = await userRepo.findOneOrFail({
-      where: { email: 'friend@seerr.dev' },
+      where: { email: 'demo@seerr.dev' },
     });
 
     friend.permissions = Permission.CREATE_ISSUES;
     await userRepo.save(friend);
 
-    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const agent = await loginAs('demo@seerr.dev', 'test1234');
     const res = await agent.post(`/issue/${issue.id}/media/search`);
 
     assert.strictEqual(res.status, 403);
@@ -378,13 +392,13 @@ describe('POST /issue/:issueId/media/search', () => {
     });
     const issue = await seedIssue(media, { createdBy: admin });
     const friend = await userRepo.findOneOrFail({
-      where: { email: 'friend@seerr.dev' },
+      where: { email: 'demo@seerr.dev' },
     });
 
     friend.permissions = Permission.MANAGE_ISSUES;
     await userRepo.save(friend);
 
-    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const agent = await loginAs('demo@seerr.dev', 'test1234');
     const res = await agent.post(`/issue/${issue.id}/media/search`);
 
     assert.strictEqual(res.status, 204);
@@ -396,13 +410,13 @@ describe('POST /issue/:issueId/media/search', () => {
     const media = await seedMedia({ serviceId: 0, externalServiceId: 4 });
     const issue = await seedIssue(media);
     const friend = await userRepo.findOneOrFail({
-      where: { email: 'friend@seerr.dev' },
+      where: { email: 'demo@seerr.dev' },
     });
 
     friend.permissions = Permission.REQUEST;
     await userRepo.save(friend);
 
-    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const agent = await loginAs('demo@seerr.dev', 'test1234');
     const res = await agent.post(`/issue/${issue.id}/media/search`);
 
     assert.strictEqual(res.status, 403);
@@ -544,13 +558,13 @@ describe('DELETE /issue/:issueId/media', () => {
     const media = await seedMedia();
     const issue = await seedIssue(media);
     const friend = await userRepo.findOneOrFail({
-      where: { email: 'friend@seerr.dev' },
+      where: { email: 'demo@seerr.dev' },
     });
 
     friend.permissions = Permission.CREATE_ISSUES;
     await userRepo.save(friend);
 
-    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const agent = await loginAs('demo@seerr.dev', 'test1234');
     const res = await agent.delete(`/issue/${issue.id}/media`);
 
     assert.strictEqual(res.status, 403);
@@ -689,5 +703,32 @@ describe('DELETE /issue/:issueId/media', () => {
     const res = await agent.delete('/issue/99999999/media');
 
     assert.strictEqual(res.status, 404);
+  });
+});
+
+describe('GET /issueComment/:commentId', () => {
+  it('omits notification settings from the comment author', async () => {
+    const userRepo = getRepository(User);
+    const media = await seedMedia();
+    const friend = await userRepo.findOneOrFail({
+      where: { email: 'demo@seerr.dev' },
+    });
+    await seedUserSettings('demo@seerr.dev');
+
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
+    const created = await agent.post('/issue').send({
+      issueType: IssueType.VIDEO,
+      message: 'Playback stutters near the end.',
+      mediaId: media.id,
+      userId: friend.id,
+    });
+    assert.strictEqual(created.status, 201);
+
+    const res = await agent.get(`/issueComment/${created.body.comments[0].id}`);
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.user.email, 'demo@seerr.dev');
+    assert.ok(!('settings' in res.body.user));
+    assertNoCredentials(res.body);
   });
 });
