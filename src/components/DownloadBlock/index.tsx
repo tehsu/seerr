@@ -72,6 +72,8 @@ const DownloadBlock = ({
   const intl = useIntl();
   const { hasPermission } = useUser();
 
+  // Everyone else only gets the progress, time left and status; the server
+  // strips the rest out of their responses too.
   const isAdmin = hasPermission(Permission.ADMIN);
   const hasError =
     downloadItem.trackedDownloadStatus === 'error' ||
@@ -152,7 +154,7 @@ const DownloadBlock = ({
           <span>{progress}%</span>
         </div>
       </div>
-      {!!downloadItem.size && (
+      {isAdmin && !!downloadItem.size && (
         <div className="mb-2 flex items-center justify-between text-xs text-gray-300">
           <span>
             {intl.formatMessage(messages.progress, {
@@ -182,7 +184,7 @@ const DownloadBlock = ({
               ? intl.formatMessage(statusLabel)
               : downloadItem.status}
           </Badge>
-          {!!downloadItem.quality && (
+          {isAdmin && !!downloadItem.quality && (
             <Badge badgeType="light">{downloadItem.quality}</Badge>
           )}
         </span>

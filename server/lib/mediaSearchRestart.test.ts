@@ -129,7 +129,7 @@ async function seedRequest(
   fields: Partial<MediaRequest> = {}
 ): Promise<MediaRequest> {
   const requestedBy = await getRepository(User).findOneOrFail({
-    where: { email: 'friend@seerr.dev' },
+    where: { email: 'demo@seerr.dev' },
   });
 
   return getRepository(MediaRequest).save(
@@ -166,7 +166,7 @@ describe('restartMediaSearch', () => {
     assert.strictEqual(persistedRequest.status, MediaRequestStatus.APPROVED);
     assert.strictEqual(persistedRequest.modifiedBy?.id, user.id);
     // the original requester keeps ownership of the request
-    assert.strictEqual(persistedRequest.requestedBy.email, 'friend@seerr.dev');
+    assert.strictEqual(persistedRequest.requestedBy.email, 'demo@seerr.dev');
 
     const persistedMedia = await getRepository(Media).findOneOrFail({
       where: { id: media.id },
